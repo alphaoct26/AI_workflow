@@ -76,7 +76,7 @@ def run_ai_analysis() -> BusinessInsights:
     logger.info(f"Sending prompt to Gemini using model '{GEMINI_MODEL}'...")
     try:
         # Initialize the official Google GenAI Client
-        client = genai.Client()
+        client = genai.Client(http_options=types.HttpOptions(timeout=30000))
         
         response = client.models.generate_content(
             model=GEMINI_MODEL,

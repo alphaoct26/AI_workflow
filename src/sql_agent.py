@@ -202,7 +202,7 @@ def start_chat_loop():
         print("Please set GEMINI_API_KEY to start chatting with your database.")
         return
 
-    client = genai.Client()
+    client = genai.Client(http_options=types.HttpOptions(timeout=30000))
     
     print("\n" + "="*60)
     print("      Welcome to the Interactive SQL Analytics Agent")
