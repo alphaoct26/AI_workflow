@@ -64,12 +64,11 @@ def test_blocked_chained_write_keyword():
     assert "delete" in err_nested.lower()
 
 def test_execute_query_schema_mismatch():
-    """Verify that execute_query raises a sqlite3.Error when checking an invalid column or table schema via EXPLAIN."""
-    import sqlite3
+    """Verify that execute_query raises an Exception when checking an invalid column or table schema via EXPLAIN."""
     from src.sql_agent import execute_query
     
-    # Executing a query with an invalid column name should raise a sqlite3.Error via EXPLAIN validation
-    with pytest.raises(sqlite3.Error) as exc_info:
+    # Executing a query with an invalid column name should raise an Exception via EXPLAIN validation
+    with pytest.raises(Exception) as exc_info:
         execute_query("SELECT non_existent_column_abc FROM silver_clean_sales LIMIT 1;")
     assert "SQL Plan Validation Failed" in str(exc_info.value)
     assert "no such column" in str(exc_info.value).lower()

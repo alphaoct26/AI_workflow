@@ -20,10 +20,10 @@ def generate_matplotlib_chart():
     """Queries the Gold summary and creates a clean, premium bar chart of Monthly Revenue."""
     logger.info("Presenter: Creating Matplotlib visual chart...")
     
-    if not DB_PATH.exists():
-        raise FileNotFoundError(f"Database not found at {DB_PATH}. Run the ETL pipeline first.")
-        
-    conn = sqlite3.connect(str(DB_PATH))
+    from src.db_adapter import DatabaseAdapter
+    db = DatabaseAdapter()
+    
+    conn = db.get_connection()
     df = pd.read_sql_query("SELECT month, revenue FROM gold_monthly_metrics ORDER BY month ASC", conn)
     conn.close()
     

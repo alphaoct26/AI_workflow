@@ -26,10 +26,10 @@ class BusinessInsights(BaseModel):
 
 def extract_gold_data_as_text() -> str:
     """Queries the Gold summary table and formats it as a Markdown table for the LLM."""
-    if not DB_PATH.exists():
-        raise FileNotFoundError(f"Database not found at {DB_PATH}. Run the ETL pipeline first.")
-        
-    conn = sqlite3.connect(str(DB_PATH))
+    from src.db_adapter import DatabaseAdapter
+    db = DatabaseAdapter()
+    
+    conn = db.get_connection()
     df = pd.read_sql_query("SELECT * FROM gold_monthly_metrics ORDER BY month ASC", conn)
     conn.close()
     

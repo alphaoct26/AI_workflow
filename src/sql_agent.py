@@ -14,43 +14,83 @@ logger = logging.getLogger("SQL_Agent")
 
 def get_database_schema() -> str:
     """
-    Connects to the SQLite DB and extracts creation schemas and sample rows 
+    Connects to the database and extracts table schemas and sample rows 
     for Bronze, Silver, and Gold tables to provide schema context to the LLM.
     """
-    if not DB_PATH.exists():
-        return "Database does not exist. Please run the ETL pipeline first."
-        
-    conn = sqlite3.connect(str(DB_PATH))
+    from src.db_adapter import DatabaseAdapter
+    db = DatabaseAdapter()
+    
+    conn = db.get_connection()
     cursor = conn.cursor()
     
-    # Query sqlite_master for table definitions
-    cursor.execute("""
-        SELECT name, sql 
-        FROM sqlite_master 
-        WHERE type='table' AND name NOT LIKE 'sqlite_%';
-    """)
-    tables = cursor.fetchall()
-    
     schema_details = []
-    for table_name, create_sql in tables:
-        # Get sample rows
-        try:
-            cursor.execute(f"SELECT * FROM {table_name} LIMIT 3")
-            columns = [col[0] for col in cursor.description]
-            samples = cursor.fetchall()
-            
-            sample_str = f"Columns: {', '.join(columns)}\nSample Rows:\n"
-            for row in samples:
-                sample_str += f"  {dict(zip(columns, row))}\n"
-        except Exception as e:
-            sample_str = f"Error retrieving samples: {e}\n"
-            
-        schema_details.append(
-            f"### Table: {table_name}\n"
-            f"SQL Schema:\n```sql\n{create_sql}\n```\n"
-            f"{sample_str}"
-        )
+    
+    if db.dialect == "postgres":
+        # Get list of public tables
+        cursor.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+              AND table_name NOT LIKE 'pg_%';
+        """)
+        tables = [row[0] for row in cursor.fetchall()]
         
+        for table_name in tables:
+            # Query column details for CREATE TABLE simulation
+            cursor.execute("""
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = %s
+                ORDER BY ordinal_position;
+            """, (table_name,))
+            cols = cursor.fetchall()
+            create_sql = f"CREATE TABLE {table_name} (\n    " + ",\n    ".join([f"{col[0]} {col[1].upper()}" for col in cols]) + "\n);"
+            
+            # Get sample rows
+            try:
+                cursor.execute(f"SELECT * FROM {table_name} LIMIT 3")
+                columns = [col[0] for col in cursor.description]
+                samples = cursor.fetchall()
+                
+                sample_str = f"Columns: {', '.join(columns)}\nSample Rows:\n"
+                for row in samples:
+                    sample_str += f"  {dict(zip(columns, row))}\n"
+            except Exception as e:
+                sample_str = f"Error retrieving samples: {e}\n"
+                
+            schema_details.append(
+                f"### Table: {table_name}\n"
+                f"SQL Schema:\n```sql\n{create_sql}\n```\n"
+                f"{sample_str}"
+            )
+    else:
+        # Query sqlite_master for SQLite table definitions
+        cursor.execute("""
+            SELECT name, sql 
+            FROM sqlite_master 
+            WHERE type='table' AND name NOT LIKE 'sqlite_%';
+        """)
+        tables = cursor.fetchall()
+        
+        for table_name, create_sql in tables:
+            # Get sample rows
+            try:
+                cursor.execute(f"SELECT * FROM {table_name} LIMIT 3")
+                columns = [col[0] for col in cursor.description]
+                samples = cursor.fetchall()
+                
+                sample_str = f"Columns: {', '.join(columns)}\nSample Rows:\n"
+                for row in samples:
+                    sample_str += f"  {dict(zip(columns, row))}\n"
+            except Exception as e:
+                sample_str = f"Error retrieving samples: {e}\n"
+                
+            schema_details.append(
+                f"### Table: {table_name}\n"
+                f"SQL Schema:\n```sql\n{create_sql}\n```\n"
+                f"{sample_str}"
+            )
+            
     conn.close()
     return "\n\n".join(schema_details)
 
@@ -135,22 +175,25 @@ def is_safe_query(sql_query: str) -> tuple[bool, str]:
     return True, ""
 
 def execute_query(sql_query: str):
-    """Executes SQL against SQLite and returns column names and rows, or raises an exception."""
+    """Executes SQL against the database and returns column names and rows, or raises an exception."""
     # 1. Check SQL safety
     is_safe, err_msg = is_safe_query(sql_query)
     if not is_safe:
         raise PermissionError(f"SQL Guard Blocked Query: {err_msg}")
         
-    conn = sqlite3.connect(str(DB_PATH))
+    from src.db_adapter import DatabaseAdapter
+    db = DatabaseAdapter()
+    conn = db.get_connection()
     
     # 2. LLM Output Validation Layer: Compile/Verify execution plan before running the query
     try:
         explain_cursor = conn.cursor()
-        explain_cursor.execute(f"EXPLAIN QUERY PLAN {sql_query}")
+        explain_query = f"EXPLAIN {sql_query}" if db.dialect == "postgres" else f"EXPLAIN QUERY PLAN {sql_query}"
+        explain_cursor.execute(explain_query)
         explain_cursor.close()
-    except sqlite3.Error as explain_err:
+    except Exception as explain_err:
         conn.close()
-        raise sqlite3.Error(f"SQL Plan Validation Failed (Syntax or Table/Column schema mismatch): {explain_err}")
+        raise Exception(f"SQL Plan Validation Failed (Syntax or Table/Column schema mismatch): {explain_err}")
         
     # 3. Execute query
     cursor = conn.cursor()
