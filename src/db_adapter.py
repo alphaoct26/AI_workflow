@@ -261,45 +261,83 @@ class DatabaseAdapter:
 
     def get_gold_aggregation_query(self) -> str:
         """Returns dialect-specific query to populate the gold_monthly_metrics aggregates."""
-        # SQLite uses strftime('%Y-%m', date); PostgreSQL uses TO_CHAR(date, 'YYYY-MM')
-        month_func = "TO_CHAR(date, 'YYYY-MM')" if self.dialect == "postgres" else "strftime('%Y-%m', date)"
-        
-        return f"""
-            WITH monthly_sales AS (
+        if self.dialect == "postgres":
+            return """
+                WITH monthly_sales AS (
+                    SELECT 
+                        TO_CHAR(date, 'YYYY-MM') as month,
+                        category,
+                        SUM(revenue) as category_revenue,
+                        SUM(units_sold) as category_units
+                    FROM silver_clean_sales
+                    GROUP BY month, category
+                ),
+                ranked_categories AS (
+                    SELECT 
+                        month,
+                        category,
+                        ROW_NUMBER() OVER (PARTITION BY month ORDER BY category_revenue DESC) as rk
+                    FROM monthly_sales
+                ),
+                monthly_aggregates AS (
+                    SELECT 
+                        TO_CHAR(date, 'YYYY-MM') as month,
+                        ROUND(SUM(revenue)::numeric, 2) as revenue,
+                        ROUND(SUM(cost)::numeric, 2) as cost,
+                        ROUND(CAST((SUM(revenue) - SUM(cost)) / SUM(revenue) AS numeric), 4) as profit_margin,
+                        SUM(units_sold) as units_sold
+                    FROM silver_clean_sales
+                    GROUP BY month
+                )
+                INSERT INTO gold_monthly_metrics (month, revenue, cost, profit_margin, units_sold, top_category)
                 SELECT 
-                    {month_func} as month,
-                    category,
-                    SUM(revenue) as category_revenue,
-                    SUM(units_sold) as category_units
-                FROM silver_clean_sales
-                GROUP BY month, category
-            ),
-            ranked_categories AS (
+                    ma.month,
+                    ma.revenue,
+                    ma.cost,
+                    ma.profit_margin,
+                    ma.units_sold,
+                    rc.category as top_category
+                FROM monthly_aggregates ma
+                JOIN ranked_categories rc ON ma.month = rc.month AND rc.rk = 1
+                ORDER BY ma.month ASC;
+            """
+        else:
+            return """
+                WITH monthly_sales AS (
+                    SELECT 
+                        strftime('%Y-%m', date) as month,
+                        category,
+                        SUM(revenue) as category_revenue,
+                        SUM(units_sold) as category_units
+                    FROM silver_clean_sales
+                    GROUP BY month, category
+                ),
+                ranked_categories AS (
+                    SELECT 
+                        month,
+                        category,
+                        ROW_NUMBER() OVER (PARTITION BY month ORDER BY category_revenue DESC) as rk
+                    FROM monthly_sales
+                ),
+                monthly_aggregates AS (
+                    SELECT 
+                        strftime('%Y-%m', date) as month,
+                        ROUND(SUM(revenue), 2) as revenue,
+                        ROUND(SUM(cost), 2) as cost,
+                        ROUND((SUM(revenue) - SUM(cost)) / SUM(revenue), 4) as profit_margin,
+                        SUM(units_sold) as units_sold
+                    FROM silver_clean_sales
+                    GROUP BY month
+                )
+                INSERT INTO gold_monthly_metrics (month, revenue, cost, profit_margin, units_sold, top_category)
                 SELECT 
-                    month,
-                    category,
-                    ROW_NUMBER() OVER (PARTITION BY month ORDER BY category_revenue DESC) as rk
-                FROM monthly_sales
-            ),
-            monthly_aggregates AS (
-                SELECT 
-                    {month_func} as month,
-                    ROUND(SUM(revenue), 2) as revenue,
-                    ROUND(SUM(cost), 2) as cost,
-                    ROUND((SUM(revenue) - SUM(cost)) / SUM(revenue), 4) as profit_margin,
-                    SUM(units_sold) as units_sold
-                FROM silver_clean_sales
-                GROUP BY month
-            )
-            INSERT INTO gold_monthly_metrics (month, revenue, cost, profit_margin, units_sold, top_category)
-            SELECT 
-                ma.month,
-                ma.revenue,
-                ma.cost,
-                ma.profit_margin,
-                ma.units_sold,
-                rc.category as top_category
-            FROM monthly_aggregates ma
-            JOIN ranked_categories rc ON ma.month = rc.month AND rc.rk = 1
-            ORDER BY ma.month ASC;
-        """
+                    ma.month,
+                    ma.revenue,
+                    ma.cost,
+                    ma.profit_margin,
+                    ma.units_sold,
+                    rc.category as top_category
+                FROM monthly_aggregates ma
+                JOIN ranked_categories rc ON ma.month = rc.month AND rc.rk = 1
+                ORDER BY ma.month ASC;
+            """
