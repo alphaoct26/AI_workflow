@@ -12,6 +12,9 @@ ENV/
 # Database files (we only want schemas and ETL code in GitHub)
 data/ecommerce.db
 
+# API Key Credentials
+llm_keys.txt
+
 # Log files
 *.log
 
