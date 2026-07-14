@@ -136,12 +136,23 @@ def is_safe_query(sql_query: str) -> tuple[bool, str]:
 
 def execute_query(sql_query: str):
     """Executes SQL against SQLite and returns column names and rows, or raises an exception."""
-    # Check SQL safety
+    # 1. Check SQL safety
     is_safe, err_msg = is_safe_query(sql_query)
     if not is_safe:
         raise PermissionError(f"SQL Guard Blocked Query: {err_msg}")
         
     conn = sqlite3.connect(str(DB_PATH))
+    
+    # 2. LLM Output Validation Layer: Compile/Verify execution plan before running the query
+    try:
+        explain_cursor = conn.cursor()
+        explain_cursor.execute(f"EXPLAIN QUERY PLAN {sql_query}")
+        explain_cursor.close()
+    except sqlite3.Error as explain_err:
+        conn.close()
+        raise sqlite3.Error(f"SQL Plan Validation Failed (Syntax or Table/Column schema mismatch): {explain_err}")
+        
+    # 3. Execute query
     cursor = conn.cursor()
     try:
         cursor.execute(sql_query)

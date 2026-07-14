@@ -112,8 +112,8 @@ core deliverables:
 
 ---
 
-## 7. Security Hardening (.env Credentials & SQL Guard)
-"To make this project safe for production, I implemented two major security features:
+## 7. Security Hardening & LLM Output Validation (.env, SQL Guard, & Query Plans)
+"To make this project safe for production, I implemented three defense-in-depth security features:
 - Secure Secrets Management: API keys are completely isolated in a local `.env` 
   file loaded using `python-dotenv`. The file is ignored by Git, preventing any 
   accidental credential leaks to public repositories.
@@ -123,34 +123,51 @@ core deliverables:
   with SELECT or WITH (read-only), and intercepts any queries containing write 
   keywords like DROP, DELETE, UPDATE, INSERT, ALTER, or PRAGMA. If a forbidden 
   command is detected, it throws a PermissionError. The agent intercepts this error 
-  and automatically heals the query."
+  and automatically heals the query.
+- EXPLAIN Validation Layer: To make sure we don't blindly trust the generated SQL, 
+  the script executes 'EXPLAIN QUERY PLAN <sql_query>' before actual execution. 
+  This serves as an SQLite compile-check, validating the syntax and schema against 
+  the active database without executing potentially expensive operations. If a 
+  schema mismatch or syntax error is found, it is caught and corrected by the AI."
 
 ---
 
-## 8. Automated Unit Testing (pytest)
-"To verify that our transformation rules and safety boundaries are 100% correct, 
-I wrote a pytest suite of 14 unit tests. These run against an isolated in-memory 
-SQLite database:
-- 6 tests validate our Silver layer ETL rules (row deduplication, date 
-  standardization, null/None category cleaning, and filtering out negative values).
-- 8 tests validate the SQL Guard, verifying that safe queries pass while write 
-  attempts (including complex chained queries) are blocked and rejected."
+## 8. Data Quality Auto-Quarantine (Remediation Path)
+"Rather than quietly dropping rows that fail DQ checks, the pipeline automatically 
+quarantines them into a dedicated 'quarantine_rejected_sales' audit table. It logs 
+the raw record values, the source file, and classifies the specific rejection reason—
+such as 'Missing/Invalid Date', 'Missing/Invalid Category', 'Negative Numeric Metric(s)', 
+or 'Duplicate Transaction'. These statistics are summarized directly in the console 
+audit report, turning simple data quality detection into an active, reviewable 
+remediation path."
 
 ---
 
-## 9. Execution Flow: Step-by-Step
+## 9. Automated Unit Testing (pytest)
+"To verify that our transformation rules, auto-quarantine, and safety boundaries 
+are 100% correct, I wrote a pytest suite of 16 unit tests. These run against an 
+isolated in-memory SQLite database:
+- 7 tests validate our Silver layer ETL rules and auto-quarantine logic (capturing 
+  and classifying rejections).
+- 9 tests validate the SQL Guard and query compiler validation, verifying that safe 
+  queries pass while write attempts or invalid schemas are rejected."
+
+---
+
+## 10. Execution Flow: Step-by-Step
 "Here is the exact lifecycle of a run:
 1. User drops new sales CSVs into the landing_zone/ folder.
 2. main.py is executed, securely loading credentials from `.env`.
 3. SQLite schemas are initialized.
 4. Bronze layer ingests the raw files and logs the source.
-5. Silver layer runs transformation SQL (deduplication, date parsing).
+5. Silver layer cleans and separates validated rows into 'silver_clean_sales' and 
+   quarantines rejected ones into 'quarantine_rejected_sales' with reasons.
 6. Gold layer calculates monthly metrics and top categories.
-7. Data Quality Audit reconciles revenues and checks for violations.
+7. Data Quality Audit reconciles revenues and prints the quarantined breakdown.
 8. Matplotlib renders the monthly chart and exports it.
 9. Power BI Project generator writes the launcher and links local datasets.
 10. The LLM Gateway calls the active provider, retrieves structured business 
     insights, and python-pptx compiles the slides.
 11. The Interactive SQL Agent chat starts in the terminal, ready to answer questions.
-12. Developers run `pytest -v` to verify database transformation and safety rules."
+12. Developers run `pytest -v` to verify database transformation, safety, and plan compiler rules."
 ================================================================================

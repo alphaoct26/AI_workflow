@@ -1,5 +1,4 @@
 import sqlite3
-import re
 import pytest
 
 # Test DB schemas mimicking etl_orchestrator.py
@@ -29,7 +28,68 @@ CREATE TABLE silver_clean_sales (
 );
 """
 
-# Active SQL query used for transformations in the pipeline
+CREATE_QUARANTINE_TABLE = """
+CREATE TABLE quarantine_rejected_sales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    raw_date TEXT,
+    raw_category TEXT,
+    raw_revenue TEXT,
+    raw_cost TEXT,
+    raw_units_sold TEXT,
+    source_file TEXT,
+    ingested_at TEXT,
+    rejection_reason TEXT,
+    quarantined_at TEXT
+);
+"""
+
+# SQL queries for quarantine extraction
+QUARANTINE_TRANSFORM_SQL = """
+INSERT INTO quarantine_rejected_sales (
+    raw_date, raw_category, raw_revenue, raw_cost, raw_units_sold, 
+    source_file, ingested_at, rejection_reason, quarantined_at
+)
+-- Case 1: Missing Date
+SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
+       'Missing/Invalid Date', datetime('now')
+FROM bronze_raw_sales
+WHERE date IS NULL OR date = 'None' OR date = ''
+UNION ALL
+-- Case 2: Missing Category
+SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
+       'Missing/Invalid Category', datetime('now')
+FROM bronze_raw_sales
+WHERE (date IS NOT NULL AND date != 'None' AND date != '')
+  AND (category IS NULL OR category = 'None' OR category = '')
+UNION ALL
+-- Case 3: Negative Financial Metrics
+SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
+       'Negative Numeric Metric(s)', datetime('now')
+FROM bronze_raw_sales
+WHERE (date IS NOT NULL AND date != 'None' AND date != '')
+  AND (category IS NOT NULL AND category != 'None' AND category != '')
+  AND (CAST(revenue AS REAL) < 0 OR CAST(cost AS REAL) < 0 OR CAST(units_sold AS INTEGER) < 0)
+UNION ALL
+-- Case 4: Duplicate Transactions (rn > 1)
+SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
+       'Duplicate Transaction', datetime('now')
+FROM (
+    SELECT *,
+           ROW_NUMBER() OVER(
+               PARTITION BY date, category, units_sold, revenue 
+               ORDER BY ingested_at DESC
+           ) as rn
+    FROM bronze_raw_sales
+    WHERE date IS NOT NULL AND date != 'None' AND date != ''
+      AND category IS NOT NULL AND category != 'None' AND category != ''
+)
+WHERE rn > 1 
+  AND CAST(revenue AS REAL) >= 0 
+  AND CAST(cost AS REAL) >= 0 
+  AND CAST(units_sold AS INTEGER) >= 0;
+"""
+
+# Active SQL query used for Silver ingestion
 SILVER_TRANSFORM_SQL = """
 WITH ranked_bronze AS (
     SELECT 
@@ -70,18 +130,20 @@ WHERE rn = 1
 
 @pytest.fixture
 def test_db():
-    """Sets up an in-memory SQLite database with bronze and silver schemas."""
+    """Sets up an in-memory SQLite database with bronze, silver, and quarantine schemas."""
     conn = sqlite3.connect(":memory:")
     cursor = conn.cursor()
     cursor.execute(CREATE_BRONZE_TABLE)
     cursor.execute(CREATE_SILVER_TABLE)
+    cursor.execute(CREATE_QUARANTINE_TABLE)
     conn.commit()
     yield conn
     conn.close()
 
 def run_transform(conn):
-    """Executes the transformation query on the test database."""
+    """Executes the quarantine and transformation queries on the test database."""
     cursor = conn.cursor()
+    cursor.execute(QUARANTINE_TRANSFORM_SQL)
     cursor.execute(SILVER_TRANSFORM_SQL)
     conn.commit()
 
@@ -118,9 +180,6 @@ def test_deduplication_latest_record(test_db):
     
     run_transform(test_db)
     
-    cursor.execute("SELECT COUNT(*), source_file FROM silver_clean_sales JOIN bronze_raw_sales USING(date, category)")
-    count, source = cursor.fetchone()
-    # Confirm it deduplicated to a single row
     cursor.execute("SELECT COUNT(*) FROM silver_clean_sales")
     assert cursor.fetchone()[0] == 1
 
@@ -171,17 +230,14 @@ def test_filter_null_or_empty_categories(test_db):
 def test_filter_negative_records(test_db):
     """Test that rows containing negative values for units_sold, revenue, or cost are rejected."""
     cursor = test_db.cursor()
-    # Negative revenue
     cursor.execute(
         "INSERT INTO bronze_raw_sales (date, category, revenue, cost, units_sold, ingested_at, source_file) VALUES (?, ?, ?, ?, ?, ?, ?)",
         ("2026-05-15", "Electronics", "-100.00", "60.00", "2", "2026-05-15 12:00:00", "test.csv")
     )
-    # Negative cost
     cursor.execute(
         "INSERT INTO bronze_raw_sales (date, category, revenue, cost, units_sold, ingested_at, source_file) VALUES (?, ?, ?, ?, ?, ?, ?)",
         ("2026-05-15", "Electronics", "100.00", "-60.00", "2", "2026-05-15 12:00:00", "test.csv")
     )
-    # Negative units sold
     cursor.execute(
         "INSERT INTO bronze_raw_sales (date, category, revenue, cost, units_sold, ingested_at, source_file) VALUES (?, ?, ?, ?, ?, ?, ?)",
         ("2026-05-15", "Electronics", "100.00", "60.00", "-2", "2026-05-15 12:00:00", "test.csv")
@@ -207,3 +263,47 @@ def test_date_standardization(test_db):
     cursor.execute("SELECT date FROM silver_clean_sales")
     date_val = cursor.fetchone()[0]
     assert date_val == "2026-05-15"
+
+def test_quarantine_rejections(test_db):
+    """Test that rows failing validations are auto-quarantined with proper rejection reasons."""
+    cursor = test_db.cursor()
+    # 1. Missing Date
+    cursor.execute(
+        "INSERT INTO bronze_raw_sales (date, category, revenue, cost, units_sold, ingested_at, source_file) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (None, "Electronics", "100.00", "60.00", "2", "2026-05-15 12:00:00", "test.csv")
+    )
+    # 2. Missing Category
+    cursor.execute(
+        "INSERT INTO bronze_raw_sales (date, category, revenue, cost, units_sold, ingested_at, source_file) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("2026-05-15", "", "100.00", "60.00", "2", "2026-05-15 12:00:00", "test.csv")
+    )
+    # 3. Negative Numeric Metric
+    cursor.execute(
+        "INSERT INTO bronze_raw_sales (date, category, revenue, cost, units_sold, ingested_at, source_file) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("2026-05-15", "Electronics", "100.00", "-60.00", "2", "2026-05-15 12:00:00", "test.csv")
+    )
+    # 4. Duplicate rows (We add two identical rows)
+    cursor.execute(
+        "INSERT INTO bronze_raw_sales (date, category, revenue, cost, units_sold, ingested_at, source_file) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("2026-05-15", "Electronics", "200.00", "120.00", "4", "2026-05-15 12:00:00", "dup.csv")
+    )
+    cursor.execute(
+        "INSERT INTO bronze_raw_sales (date, category, revenue, cost, units_sold, ingested_at, source_file) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("2026-05-15", "Electronics", "200.00", "120.00", "4", "2026-05-15 13:00:00", "dup.csv")
+    )
+    test_db.commit()
+    
+    run_transform(test_db)
+    
+    # Assertions on quarantine rejected rows
+    cursor.execute("SELECT rejection_reason, COUNT(*) FROM quarantine_rejected_sales GROUP BY rejection_reason")
+    rejections = dict(cursor.fetchall())
+    
+    assert rejections.get("Missing/Invalid Date") == 1
+    assert rejections.get("Missing/Invalid Category") == 1
+    assert rejections.get("Negative Numeric Metric(s)") == 1
+    assert rejections.get("Duplicate Transaction") == 1
+    
+    # Verify that exactly 1 row made it to the silver clean table (the deduplicated clean row)
+    cursor.execute("SELECT COUNT(*) FROM silver_clean_sales")
+    assert cursor.fetchone()[0] == 1

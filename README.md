@@ -92,9 +92,9 @@ python main.py
 ### What Happens When You Run `main.py`:
 1. **Mock Data Drop**: Generates mock e-commerce CSV batches (including anomalies/duplicates) in the `landing_zone/` folder.
 2. **Bronze Ingest**: Ingests files into the SQLite database.
-3. **Silver ETL & Clean**: Executes standard SQL scripts to clean and deduplicate data.
+3. **Silver ETL & Auto-Quarantine**: Executes standard SQL cleaning scripts to clean, deduplicate, and auto-quarantine records with specific rejection reasons into a dedicated audit table.
 4. **Gold Aggregations**: Builds business-tier metrics using advanced window functions.
-5. **Data Quality Audits**: Validates record counts, null violations, and reconciles revenue numbers across layers.
+5. **Data Quality Audits**: Validates record counts, null violations, auto-quarantine breakdowns, and reconciles revenue numbers across layers.
 6. **Matplotlib Visuals**: Saves a stylized bar chart of revenue performance to `data/monthly_revenue.png`.
 7. **Power BI Project Creation**: Generates a `.pbip` folder structure with absolute data links customized for your machine.
 8. **Gemini Insights Generation**: Extracts high-level findings and recommendations from the Gold metrics.
@@ -130,25 +130,27 @@ The programmatically created `PowerBI_Report/AutoAnalyst.pbip` launcher file is 
 
 ---
 
-## 🛡️ Production Security & SQL Guard
+## 🛡️ Production Security, SQL Guard & Plan Compiler Validation
 
-To prevent malicious database actions (like SQL injection) via generated LLM queries, the SQL agent enforces a strict **SQL Guard Validation** layer before execution:
+To prevent malicious database actions (like SQL injection) via generated LLM queries, the SQL agent enforces a strict **SQL Guard & Validation** layer before execution:
 - **Read-Only Enforcements**: The query is validated using regex and must begin strictly with `SELECT` or `WITH` (for CTEs).
 - **Modification Guard**: The query is scanned for forbidden keywords: `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `CREATE`, `REPLACE`, `TRUNCATE`, `GRANT`, `REVOKE`, `PRAGMA`, `ATTACH`, `DETACH`, `WRITE`, `EXEC` (case-insensitive).
-- **Self-Correction Loop**: If a forbidden query is attempted, the pipeline throws a `PermissionError` which triggers the AI's auto-correction loop, instructing it to rewrite a safe read-only query.
+- **LLM Output Validation Layer (Query Plan Compilation)**: Before executing the SQL, the script runs `EXPLAIN QUERY PLAN <sql_query>`. This validates the syntax and schema mapping against the active database without executing potentially expensive data-access operations. If SQLite fails to compile the query plan (e.g. referencing a non-existent column), the compiler error is raised, caught, and fed back to the AI for self-correction.
+- **Self-Correction Loop**: If a safety violation or syntax plan error is caught, the pipeline raises an exception which triggers the AI's auto-correction loop, instructing it to rewrite a safe, syntactically valid query.
 
 ---
 
 ## 🧪 Automated Unit Testing (pytest)
 
-The database transformation logic and SQL Guard are fully verified by a test suite using `pytest`. The tests run against an isolated in-memory SQLite database.
+The database transformation rules, auto-quarantine remediation path, and SQL Guard are fully verified by a test suite using `pytest`. The tests run against an isolated in-memory SQLite database.
 
 ### What is tested:
 1. **Deduplication**: Validates that identical raw transactions are deduplicated, keeping the latest one based on ingestion timestamp.
 2. **Standardization**: Checks that date strings are standardized to ISO `YYYY-MM-DD` date formats.
 3. **Anomaly Filtering**: Verifies that rows with negative revenue, cost, or units are discarded.
-4. **Data Integrity**: Checks that rows with missing, null, or empty categories/dates are filtered out.
+4. **Data Integrity & Quarantine**: Checks that rows with missing, null, or empty categories/dates are filtered out, classified by rejection reason, and auto-quarantined.
 5. **SQL Guard**: Validates read-only SELECT permissions and catches forbidden write queries (including chained write commands).
+6. **Query Plan Compiler**: Tests that queries with invalid columns or syntax are successfully detected and blocked via the `EXPLAIN` compiler validation.
 
 ### Run the tests:
 To execute the tests, run:

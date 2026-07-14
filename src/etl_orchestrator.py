@@ -137,6 +137,22 @@ class ETLPipeline:
             )
         """)
         
+        # 2b. Quarantine: Auto-quarantined rejected rows for review
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS quarantine_rejected_sales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                raw_date TEXT,
+                raw_category TEXT,
+                raw_revenue TEXT,
+                raw_cost TEXT,
+                raw_units_sold TEXT,
+                source_file TEXT,
+                ingested_at TEXT,
+                rejection_reason TEXT,
+                quarantined_at TIMESTAMP
+            )
+        """)
+        
         # 3. Gold: Analytical aggregated metrics
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS gold_monthly_metrics (
@@ -172,18 +188,65 @@ class ETLPipeline:
     def run_silver_transform(self):
         """
         Executes SQL cleaning queries to transform Bronze -> Silver.
-        Deduplicates rows, converts types, strips negative records, and validates category.
+        Identifies and auto-quarantines invalid raw rows, deduplicates remaining rows,
+        converts types, filters negatives, and populates the Silver layer.
         """
-        logger.info("Silver Transformation: Cleansing and sorting data...")
+        logger.info("Silver Transformation: Cleansing, sorting, and quarantining data...")
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Clear existing Silver table to prevent duplicates on rerun
+        # Clear existing Silver and Quarantine tables to prevent duplicates on rerun
         cursor.execute("DELETE FROM silver_clean_sales")
+        cursor.execute("DELETE FROM quarantine_rejected_sales")
         
-        # SQL-based ETL transformation utilizing a CTE to deduplicate and clean data
-        # Handles date cleaning, filtering null categories, eliminating negative revenue,
-        # casting datatypes, and picking the latest ingested duplicate.
+        # 1. Extract and auto-quarantine records failing validations
+        quarantine_insert_sql = """
+            INSERT INTO quarantine_rejected_sales (
+                raw_date, raw_category, raw_revenue, raw_cost, raw_units_sold, 
+                source_file, ingested_at, rejection_reason, quarantined_at
+            )
+            -- Case 1: Missing Date
+            SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
+                   'Missing/Invalid Date', datetime('now')
+            FROM bronze_raw_sales
+            WHERE date IS NULL OR date = 'None' OR date = ''
+            UNION ALL
+            -- Case 2: Missing Category
+            SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
+                   'Missing/Invalid Category', datetime('now')
+            FROM bronze_raw_sales
+            WHERE (date IS NOT NULL AND date != 'None' AND date != '')
+              AND (category IS NULL OR category = 'None' OR category = '')
+            UNION ALL
+            -- Case 3: Negative Financial Metrics
+            SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
+                   'Negative Numeric Metric(s)', datetime('now')
+            FROM bronze_raw_sales
+            WHERE (date IS NOT NULL AND date != 'None' AND date != '')
+              AND (category IS NOT NULL AND category != 'None' AND category != '')
+              AND (CAST(revenue AS REAL) < 0 OR CAST(cost AS REAL) < 0 OR CAST(units_sold AS INTEGER) < 0)
+            UNION ALL
+            -- Case 4: Duplicate Transactions (rn > 1)
+            SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
+                   'Duplicate Transaction', datetime('now')
+            FROM (
+                SELECT *,
+                       ROW_NUMBER() OVER(
+                           PARTITION BY date, category, units_sold, revenue 
+                           ORDER BY ingested_at DESC
+                       ) as rn
+                FROM bronze_raw_sales
+                WHERE date IS NOT NULL AND date != 'None' AND date != ''
+                  AND category IS NOT NULL AND category != 'None' AND category != ''
+            )
+            WHERE rn > 1 
+              AND CAST(revenue AS REAL) >= 0 
+              AND CAST(cost AS REAL) >= 0 
+              AND CAST(units_sold AS INTEGER) >= 0;
+        """
+        cursor.execute(quarantine_insert_sql)
+        
+        # 2. SQL-based ETL transformation inserting only validated clean records
         silver_insert_sql = """
             WITH ranked_bronze AS (
                 SELECT 
@@ -221,16 +284,17 @@ class ETLPipeline:
               AND clean_cost >= 0 
               AND clean_units >= 0;
         """
-        
         cursor.execute(silver_insert_sql)
         conn.commit()
         
         # Fetch status
         cursor.execute("SELECT COUNT(*) FROM silver_clean_sales")
         silver_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM quarantine_rejected_sales")
+        quarantine_count = cursor.fetchone()[0]
         conn.close()
         
-        logger.info(f"Silver Transformation: Completed. Cleaned sales table contains {silver_count} records.")
+        logger.info(f"Silver Transformation: Completed. Cleaned sales: {silver_count} rows. Quarantined: {quarantine_count} rows.")
 
     def run_gold_aggregation(self):
         """
@@ -350,10 +414,22 @@ class ETLPipeline:
         audit_results["gold_total_revenue"] = gold_revenue
         audit_results["financial_discrepancy"] = round(abs(silver_revenue - gold_revenue), 2)
         
+        # Check 4: Quarantine Statistics
+        cursor.execute("SELECT COUNT(*) FROM quarantine_rejected_sales")
+        quarantine_rows = cursor.fetchone()[0]
+        audit_results["quarantine_row_count"] = quarantine_rows
+        
+        cursor.execute("SELECT rejection_reason, COUNT(*) FROM quarantine_rejected_sales GROUP BY rejection_reason")
+        rejections_breakdown = cursor.fetchall()
+        audit_results["quarantine_breakdown"] = rejections_breakdown
+        
         # Output audit report
         logger.info("============= DATA QUALITY AUDIT REPORT =============")
         logger.info(f"Bronze Raw Records: {bronze_rows}")
         logger.info(f"Silver Cleaned Records: {silver_rows} (Discarded/Filtered: {bronze_rows - silver_rows})")
+        logger.info(f"Quarantined Records: {quarantine_rows}")
+        for reason, count in rejections_breakdown:
+            logger.info(f"  - {reason}: {count} rows")
         logger.info(f"Null Violations in Silver: {nulls_in_silver} {'[PASSED]' if nulls_in_silver == 0 else '[FAILED]'}")
         logger.info(f"Silver Total Revenue: ${silver_revenue:,.2f}")
         logger.info(f"Gold Total Revenue: ${gold_revenue:,.2f}")
