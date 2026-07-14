@@ -61,23 +61,24 @@ Ensure you are in the workspace folder and install the required libraries:
 pip install -r requirements.txt
 ```
 
-### 2. Configure Gemini API Key
-The pipeline uses the official Google GenAI library. Set your API Key in your terminal environment:
+### 2. Secure API Credentials Setup (`.env`)
+The pipeline uses `python-dotenv` to securely load API credentials. Create a file named `.env` at the root of the workspace directory (`d:\AI_workflow_project`) and populate it with your keys:
 
-**In PowerShell (Windows):**
-```powershell
-$env:GEMINI_API_KEY="your-actual-api-key-here"
+```env
+# Google Gemini API Keys (Supports comma-separated fallback lists)
+GEMINI_API_KEYS="your-gemini-key-1,your-gemini-key-2"
+
+# Anthropic Claude API Key (Optional fallback)
+# ANTHROPIC_API_KEY="your-claude-key"
+
+# NVIDIA NIM Llama API Key (Optional fallback)
+# NVIDIA_API_KEY="your-nvidia-key"
+
+# OpenAI GPT API Key (Optional fallback)
+# OPENAI_API_KEY="your-openai-key"
 ```
 
-**In CMD (Windows):**
-```cmd
-set GEMINI_API_KEY=your-actual-api-key-here
-```
-
-**In Linux/macOS:**
-```bash
-export GEMINI_API_KEY="your-actual-api-key-here"
-```
+*(The `.env` file is already listed in `.gitignore` to prevent any credentials from being pushed to public source control repositories).*
 
 ---
 
@@ -126,3 +127,31 @@ The programmatically created `PowerBI_Report/AutoAnalyst.pbip` launcher file is 
    - **Store Semantic Model using TMDL format** (or legacy PBIR)
 3. Double-click `PowerBI_Report/AutoAnalyst.pbip` to open the report.
 4. Go to **Home > Refresh** to load/update data. The model loaded into your data panel will contain `CleanSales` and `GoldSummary` with all schemas, columns, and numeric formats pre-aligned!
+
+---
+
+## 🛡️ Production Security & SQL Guard
+
+To prevent malicious database actions (like SQL injection) via generated LLM queries, the SQL agent enforces a strict **SQL Guard Validation** layer before execution:
+- **Read-Only Enforcements**: The query is validated using regex and must begin strictly with `SELECT` or `WITH` (for CTEs).
+- **Modification Guard**: The query is scanned for forbidden keywords: `DROP`, `DELETE`, `UPDATE`, `INSERT`, `ALTER`, `CREATE`, `REPLACE`, `TRUNCATE`, `GRANT`, `REVOKE`, `PRAGMA`, `ATTACH`, `DETACH`, `WRITE`, `EXEC` (case-insensitive).
+- **Self-Correction Loop**: If a forbidden query is attempted, the pipeline throws a `PermissionError` which triggers the AI's auto-correction loop, instructing it to rewrite a safe read-only query.
+
+---
+
+## 🧪 Automated Unit Testing (pytest)
+
+The database transformation logic and SQL Guard are fully verified by a test suite using `pytest`. The tests run against an isolated in-memory SQLite database.
+
+### What is tested:
+1. **Deduplication**: Validates that identical raw transactions are deduplicated, keeping the latest one based on ingestion timestamp.
+2. **Standardization**: Checks that date strings are standardized to ISO `YYYY-MM-DD` date formats.
+3. **Anomaly Filtering**: Verifies that rows with negative revenue, cost, or units are discarded.
+4. **Data Integrity**: Checks that rows with missing, null, or empty categories/dates are filtered out.
+5. **SQL Guard**: Validates read-only SELECT permissions and catches forbidden write queries (including chained write commands).
+
+### Run the tests:
+To execute the tests, run:
+```bash
+pytest -v
+```

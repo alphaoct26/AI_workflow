@@ -112,10 +112,36 @@ core deliverables:
 
 ---
 
-## 7. Execution Flow: Step-by-Step
+## 7. Security Hardening (.env Credentials & SQL Guard)
+"To make this project safe for production, I implemented two major security features:
+- Secure Secrets Management: API keys are completely isolated in a local `.env` 
+  file loaded using `python-dotenv`. The file is ignored by Git, preventing any 
+  accidental credential leaks to public repositories.
+- SQL Guard Validator: Since we let the LLM generate SQL queries dynamically, 
+  there's a risk of malicious write queries or SQL injection. I built a validator 
+  using Python regex and word boundaries. It verifies that every query starts strictly 
+  with SELECT or WITH (read-only), and intercepts any queries containing write 
+  keywords like DROP, DELETE, UPDATE, INSERT, ALTER, or PRAGMA. If a forbidden 
+  command is detected, it throws a PermissionError. The agent intercepts this error 
+  and automatically heals the query."
+
+---
+
+## 8. Automated Unit Testing (pytest)
+"To verify that our transformation rules and safety boundaries are 100% correct, 
+I wrote a pytest suite of 14 unit tests. These run against an isolated in-memory 
+SQLite database:
+- 6 tests validate our Silver layer ETL rules (row deduplication, date 
+  standardization, null/None category cleaning, and filtering out negative values).
+- 8 tests validate the SQL Guard, verifying that safe queries pass while write 
+  attempts (including complex chained queries) are blocked and rejected."
+
+---
+
+## 9. Execution Flow: Step-by-Step
 "Here is the exact lifecycle of a run:
 1. User drops new sales CSVs into the landing_zone/ folder.
-2. main.py is executed.
+2. main.py is executed, securely loading credentials from `.env`.
 3. SQLite schemas are initialized.
 4. Bronze layer ingests the raw files and logs the source.
 5. Silver layer runs transformation SQL (deduplication, date parsing).
@@ -125,5 +151,6 @@ core deliverables:
 9. Power BI Project generator writes the launcher and links local datasets.
 10. The LLM Gateway calls the active provider, retrieves structured business 
     insights, and python-pptx compiles the slides.
-11. The Interactive SQL Agent chat starts in the terminal, ready to answer questions."
+11. The Interactive SQL Agent chat starts in the terminal, ready to answer questions.
+12. Developers run `pytest -v` to verify database transformation and safety rules."
 ================================================================================

@@ -11,78 +11,56 @@ logger = logging.getLogger("LLM_Gateway")
 
 def get_llm_providers() -> list:
     """
-    Reads the list of LLM providers and credentials.
-    Checks llm_keys.txt at the root of the workspace.
-    Falls back to environment variables if the file does not exist.
+    Reads the list of LLM providers and credentials from environment variables.
+    Supports a comma-separated list of keys under GEMINI_API_KEYS to enable key rotation.
     """
     providers = []
     
-    # 1. Check llm_keys.txt
-    keys_file = BASE_DIR / "llm_keys.txt"
-    if keys_file.exists():
-        try:
-            with open(keys_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    # Skip empty lines and comments
-                    if not line or line.startswith("#"):
-                        continue
-                        
-                    parts = [p.strip() for p in line.split("|")]
-                    if len(parts) >= 3:
-                        provider = parts[0].lower()
-                        model = parts[1]
-                        key = parts[2]
-                        # Strip accidental quotes
-                        if (key.startswith('"') and key.endswith('"')) or (key.startswith("'") and key.endswith("'")):
-                            key = key[1:-1].strip()
-                            
-                        providers.append({
-                            "provider": provider,
-                            "model": model,
-                            "key": key
-                        })
-        except Exception as e:
-            logger.warning(f"Error reading llm_keys.txt: {e}")
-            
-    # 2. Fallback to Environment Variables if no providers configured
-    if not providers:
-        # Check Gemini
-        gemini_key = os.environ.get("GEMINI_API_KEY")
-        if gemini_key:
-            providers.append({
-                "provider": "gemini",
-                "model": GEMINI_MODEL,
-                "key": gemini_key
-            })
-            
-        # Check Anthropic/Claude
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-        if anthropic_key:
-            providers.append({
-                "provider": "claude",
-                "model": "claude-3-5-sonnet-20241022",
-                "key": anthropic_key
-            })
-            
-        # Check NVIDIA NIM
-        nvidia_key = os.environ.get("NVIDIA_API_KEY")
-        if nvidia_key:
-            providers.append({
-                "provider": "nvidia",
-                "model": "meta/llama-3.1-8b-instruct",
-                "key": nvidia_key
-            })
-            
-        # Check OpenAI
-        openai_key = os.environ.get("OPENAI_API_KEY")
-        if openai_key:
-            providers.append({
-                "provider": "openai",
-                "model": "gpt-4o-mini",
-                "key": openai_key
-            })
-            
+    # 1. Load Gemini Keys (supports comma-separated list)
+    gemini_keys_str = os.environ.get("GEMINI_API_KEYS")
+    gemini_keys = []
+    if gemini_keys_str:
+        gemini_keys = [k.strip() for k in gemini_keys_str.split(",") if k.strip()]
+    
+    # Fallback to single GEMINI_API_KEY if GEMINI_API_KEYS is not set
+    single_gemini_key = os.environ.get("GEMINI_API_KEY")
+    if single_gemini_key and single_gemini_key not in gemini_keys:
+        gemini_keys.append(single_gemini_key)
+        
+    for gkey in gemini_keys:
+        providers.append({
+            "provider": "gemini",
+            "model": GEMINI_MODEL,
+            "key": gkey
+        })
+        
+    # 2. Check Anthropic/Claude
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        providers.append({
+            "provider": "claude",
+            "model": "claude-3-5-sonnet-20241022",
+            "key": anthropic_key
+        })
+        
+    # 3. Check NVIDIA NIM
+    nvidia_key = os.environ.get("NVIDIA_API_KEY")
+    if nvidia_key:
+        providers.append({
+            "provider": "nvidia",
+            "model": "meta/llama-3.1-8b-instruct",
+            "key": nvidia_key
+        })
+        
+    # 4. Check OpenAI
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if openai_key:
+        providers.append({
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "key": openai_key
+        })
+        
     return providers
 
 def clean_json_response(raw_text: str) -> str:

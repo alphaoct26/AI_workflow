@@ -7,7 +7,7 @@ from src.llm_gateway import (
 # Configure logging to only show critical errors to keep output clean
 logging.basicConfig(level=logging.ERROR)
 
-def test_single_provider(p) -> bool:
+def check_single_provider(p) -> bool:
     provider = p["provider"]
     model = p["model"]
     key = p["key"]
@@ -64,7 +64,7 @@ def main():
     
     success_count = 0
     for p in providers:
-        if test_single_provider(p):
+        if check_single_provider(p):
             success_count += 1
             
     print("\n" + "="*60)

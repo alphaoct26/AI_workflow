@@ -111,8 +111,36 @@ def ask_llm_for_sql(question: str, schema_info: str, error_msg: str = None) -> s
     response_text = generate_llm_response(prompt, system_instruction=system_instruction)
     return clean_sql_query(response_text)
 
+def is_safe_query(sql_query: str) -> tuple[bool, str]:
+    """
+    Checks if the SQL query is read-only (SELECT/WITH) and does not
+    contain any modification keywords (DROP, DELETE, UPDATE, INSERT, ALTER, etc.).
+    Returns (is_safe, error_message).
+    """
+    # Clean query: strip comments and whitespace
+    clean_sql = re.sub(r'--.*$', '', sql_query, flags=re.MULTILINE)
+    clean_sql = re.sub(r'/\*.*?\*/', '', clean_sql, flags=re.DOTALL)
+    clean_sql = clean_sql.strip()
+    
+    # Must start with SELECT or WITH
+    if not re.match(r'^(select|with)\b', clean_sql, re.IGNORECASE):
+        return False, "Query must be a read-only SELECT or WITH statement."
+        
+    # Check for forbidden keywords as whole words
+    forbidden_pattern = r'\b(drop|delete|update|insert|alter|create|replace|truncate|grant|revoke|pragma|attach|detach|write|exec)\b'
+    matches = re.findall(forbidden_pattern, clean_sql, re.IGNORECASE)
+    if matches:
+        return False, f"Query contains forbidden write/modify keyword(s): {', '.join(set(matches))}"
+        
+    return True, ""
+
 def execute_query(sql_query: str):
     """Executes SQL against SQLite and returns column names and rows, or raises an exception."""
+    # Check SQL safety
+    is_safe, err_msg = is_safe_query(sql_query)
+    if not is_safe:
+        raise PermissionError(f"SQL Guard Blocked Query: {err_msg}")
+        
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     try:

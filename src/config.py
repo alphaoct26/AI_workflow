@@ -1,8 +1,12 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Base Workspace Directory
 BASE_DIR = Path("d:/AI_workflow_project")
+
+# Load environment variables
+load_dotenv(BASE_DIR / ".env")
 
 # Folders
 LANDING_ZONE_DIR = BASE_DIR / "landing_zone"
