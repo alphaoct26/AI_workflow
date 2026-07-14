@@ -26,7 +26,7 @@ for folder in [LANDING_ZONE_DIR, DATA_DIR, POWERBI_DIR]:
     folder.mkdir(parents=True, exist_ok=True)
 
 # LLM Configuration
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.5-flash"
 
 # Premium Theme Colors (Deep Slate, Indigo & Teal Accent)
 THEME_COLORS = {
