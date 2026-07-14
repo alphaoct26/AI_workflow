@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "settings": {
+    "reportId": "87c47e8e-a2b1-4f9e-a612-c2cb101eeab5"
+  },
+  "report": {
+    "path": "AutoAnalyst.Report"
+  }
+}

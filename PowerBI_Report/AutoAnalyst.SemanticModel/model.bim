@@ -1,0 +1,133 @@
+{
+  "name": "AutoAnalystModel",
+  "compatibilityLevel": 1550,
+  "model": {
+    "culture": "en-US",
+    "dataAccessOptions": {
+      "legacyRedirects": true,
+      "returnErrorValuesAsNull": true
+    },
+    "defaultPowerBIDataSourceVersion": "PowerBI_V3",
+    "relationships": [],
+    "tables": [
+      {
+        "name": "CleanSales",
+        "description": "Standardized transactions from the Silver database layer.",
+        "columns": [
+          {
+            "name": "id",
+            "dataType": "int64",
+            "sourceColumn": "id"
+          },
+          {
+            "name": "date",
+            "dataType": "dateTime",
+            "sourceColumn": "date",
+            "formatString": "yyyy-mm-dd"
+          },
+          {
+            "name": "category",
+            "dataType": "string",
+            "sourceColumn": "category"
+          },
+          {
+            "name": "revenue",
+            "dataType": "double",
+            "sourceColumn": "revenue",
+            "formatString": "\\$#,0.00"
+          },
+          {
+            "name": "cost",
+            "dataType": "double",
+            "sourceColumn": "cost",
+            "formatString": "\\$#,0.00"
+          },
+          {
+            "name": "units_sold",
+            "dataType": "int64",
+            "sourceColumn": "units_sold",
+            "formatString": "#,0"
+          },
+          {
+            "name": "profit",
+            "dataType": "double",
+            "sourceColumn": "profit",
+            "formatString": "\\$#,0.00"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "CleanSalesPartition",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\AI_workflow_project\\\\data\\\\raw_sales_clean.csv\"),[Delimiter=\",\", Columns=8, Encoding=1252, QuoteStyle=QuoteStyle.None]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\",{{\"id\", Int64.Type}, {\"date\", type date}, {\"category\", type text}, {\"revenue\", type number}, {\"cost\", type number}, {\"units_sold\", Int64.Type}, {\"profit\", type number}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "name": "GoldSummary",
+        "description": "Monthly aggregates and business metrics from the Gold warehouse layer.",
+        "columns": [
+          {
+            "name": "month",
+            "dataType": "string",
+            "sourceColumn": "month"
+          },
+          {
+            "name": "revenue",
+            "dataType": "double",
+            "sourceColumn": "revenue",
+            "formatString": "\\$#,0.00"
+          },
+          {
+            "name": "cost",
+            "dataType": "double",
+            "sourceColumn": "cost",
+            "formatString": "\\$#,0.00"
+          },
+          {
+            "name": "profit_margin",
+            "dataType": "double",
+            "sourceColumn": "profit_margin",
+            "formatString": "0.00%"
+          },
+          {
+            "name": "units_sold",
+            "dataType": "int64",
+            "sourceColumn": "units_sold",
+            "formatString": "#,0"
+          },
+          {
+            "name": "top_category",
+            "dataType": "string",
+            "sourceColumn": "top_category"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "GoldSummaryPartition",
+            "source": {
+              "type": "m",
+              "expression": [
+                "let",
+                "    Source = Csv.Document(File.Contents(\"D:\\\\AI_workflow_project\\\\data\\\\gold_monthly_metrics.csv\"),[Delimiter=\",\", Columns=6, Encoding=1252, QuoteStyle=QuoteStyle.None]),",
+                "    #\"Promoted Headers\" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),",
+                "    #\"Changed Type\" = Table.TransformColumnTypes(#\"Promoted Headers\",{{\"month\", type text}, {\"revenue\", type number}, {\"cost\", type number}, {\"profit_margin\", type number}, {\"units_sold\", Int64.Type}, {\"top_category\", type text}})",
+                "in",
+                "    #\"Changed Type\""
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

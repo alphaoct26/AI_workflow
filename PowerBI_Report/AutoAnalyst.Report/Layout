@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "theme": "Modern",
+  "layoutOptimization": 0,
+  "config": "{}",
+  "publicDisplaySettings": "{}",
+  "sections": [
+    {
+      "id": "Section1",
+      "name": "ReportSection1",
+      "displayName": "Executive Summary Dashboard",
+      "filters": "[]",
+      "config": "{}",
+      "displayOption": 1,
+      "width": 1280,
+      "height": 720,
+      "visualContainers": []
+    }
+  ]
+}
