@@ -1,0 +1,129 @@
+# Project Pitch & Technical Walkthrough Transcript
+================================================================================
+Topic: Auto-Analyst Pipeline & Conversational SQL Agent (Medallion Architecture)
+Language level: Simple, professional, conversational (Ideal for Job Interviews)
+Last Updated: July 2026
+================================================================================
+
+This document is a script/cheat-sheet to help you explain this portfolio project 
+in a simple, structured, and compelling way to recruiters, hiring managers, 
+or senior engineering teams.
+
+---
+
+## 1. The Elevating Pitch (The "What is this?")
+"I built an end-to-end, automated Data Analytics and Business Intelligence 
+pipeline. It takes raw, dirty e-commerce transactions, refines them through a 
+three-tier Data Warehouse architecture, extracts executive-level business 
+insights using a resilient Multi-LLM provider gateway, and automatically compiles 
+both a polished PowerPoint slide deck and a pre-configured Power BI project. 
+Additionally, I built an interactive 'Chat-with-Data' SQL Agent, letting users 
+query the database directly in plain English."
+
+---
+
+## 2. The Core Data Engine: Medallion Architecture (Bronze -> Silver -> Gold)
+"Instead of feeding raw, messy data straight into the AI, which causes errors 
+and hallucinations, I implemented the industry-standard Medallion Architecture 
+using Python and SQLite. This separates our database logically into three layers:
+
+1. BRONZE LAYER (Raw Staging):
+   - What it does: We load raw CSV sales files exactly as-is into a 'bronze_raw_sales' 
+     table. We inject audit metadata (like when it was ingested and what file it 
+     came from) to keep a historical record. We never edit or delete data here.
+     
+2. SILVER LAYER (Cleaned & Sorted):
+   - What it does: Our Python ETL reads the Bronze data and runs SQL scripts to 
+     clean it. It removes duplicate records, filters out invalid values (like 
+     negative revenues), standardizes date strings into standard DATE types, and 
+     validates fields. This is our 'truth' layer—clean, individual transactions.
+     
+3. GOLD LAYER (Business Aggregates):
+   - What it does: This is our presentation layer. We run advanced SQL queries 
+     with Common Table Expressions (CTEs) and Window Functions to summarize the 
+     data. It calculates monthly revenue, cost, profit margins, and finds the top-
+     selling product category for each month. This summarized table is what the AI 
+     reads."
+
+---
+
+## 3. Data Quality (DQ) Audits & Financial Reconciliation
+"To ensure the data is 100% accurate before it reaches the reports, I built a 
+Data Quality audit step. The pipeline automatically:
+- Checks for null or missing values in the Silver table.
+- Reconciles the total revenue in the Silver layer against the aggregated total 
+  in the Gold layer down to the penny.
+If there is even a $0.01 discrepancy, the pipeline logs a warning, simulating 
+production auditing."
+
+---
+
+## 4. Multi-LLM Gateway Adapter (Failover & Cost Optimization)
+"One of the biggest issues with LLM integrations in production is API rate limits, 
+quotas, or temporary service outages (like HTTP 503 Overload or 504 Gateway 
+Timeout). 
+
+To solve this, I built a custom Multi-LLM Gateway Adapter (llm_gateway.py):
+- It reads API keys from a local configuration file (llm_keys.txt).
+- It supports Google Gemini, Anthropic Claude, NVIDIA NIM (Llama), and OpenAI.
+- If the primary provider (e.g. Gemini) is overloaded or fails, the gateway 
+  detects the error, logs a warning, waits, and automatically falls back to 
+  another provider (e.g. OpenAI) to complete the request. 
+During our latest test run, when Gemini was unavailable, the pipeline rotated 
+past Gemini, tried NVIDIA, and successfully fell back to OpenAI (gpt-4o-mini) to 
+generate the business summary with zero downtime!"
+
+---
+
+## 5. Report Automation: PowerPoint & Power BI
+"Once the AI extracts the insights, the pipeline programmatically generates two 
+core deliverables:
+
+1. Slide Deck Automation (python-pptx):
+   - Slide 1: A premium, dark-themed title slide.
+   - Slide 2: An Executive Summary card on the left, and bulleted Key Findings 
+     on the right, populated directly from the LLM's structured JSON output.
+   - Slide 3: A custom-designed, borderless Matplotlib bar chart of monthly 
+     revenue on the left, placed side-by-side with the AI's Strategic 
+     Recommendations on the right.
+     
+2. Power BI Project (.pbip) Generation:
+   - I didn't just export a static spreadsheet. The pipeline dynamically generates 
+     a local Power BI Project folder. 
+   - It reads where the files are stored on your local machine and writes those 
+     exact absolute file paths directly into the Power BI semantic model's 
+     Power Query (M) code. 
+   - This means you can double-click the launcher, hit Refresh, and it loads the 
+     data instantly without needing any manual data-source configuration."
+
+---
+
+## 6. The Interactive Chat SQL Agent (Talk to your Data)
+"At the end of the pipeline, the CLI launches an interactive conversational agent:
+- When a user asks a question in plain English (e.g., 'Compare January and June sales'), 
+  the AI inspects the database schema and sample rows.
+- The AI generates a SQLite SELECT query.
+- Our Python runner executes it against the database.
+- Self-Correction Loop: If the AI generates SQL that causes an error, the script 
+  catches the exception, sends the error trace back to the LLM, and asks it to 
+  auto-correct.
+- Once the query succeeds, the LLM takes the raw rows and columns and explains 
+  them back to the user in clean, conversational English."
+
+---
+
+## 7. Execution Flow: Step-by-Step
+"Here is the exact lifecycle of a run:
+1. User drops new sales CSVs into the landing_zone/ folder.
+2. main.py is executed.
+3. SQLite schemas are initialized.
+4. Bronze layer ingests the raw files and logs the source.
+5. Silver layer runs transformation SQL (deduplication, date parsing).
+6. Gold layer calculates monthly metrics and top categories.
+7. Data Quality Audit reconciles revenues and checks for violations.
+8. Matplotlib renders the monthly chart and exports it.
+9. Power BI Project generator writes the launcher and links local datasets.
+10. The LLM Gateway calls the active provider, retrieves structured business 
+    insights, and python-pptx compiles the slides.
+11. The Interactive SQL Agent chat starts in the terminal, ready to answer questions."
+================================================================================
