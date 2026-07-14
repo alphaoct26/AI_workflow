@@ -170,7 +170,7 @@ isolated in-memory SQLite database:
 10. The LLM Gateway calls the active provider, retrieves structured business 
     insights, and python-pptx compiles the slides.
 11. The Interactive SQL Agent chat starts in the terminal, ready to answer questions.
-12. Developers run `pytest -v` to verify database transformation, safety, and plan compiler rules."
+12. Developers run `docker-compose run app pytest -v` to verify database transformation, safety, and plan compiler rules inside the container."
 
 ---
 

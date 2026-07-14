@@ -82,24 +82,30 @@ GEMINI_API_KEYS="your-gemini-key-1,your-gemini-key-2"
 
 ---
 
-## 🏃 Running the Pipeline
+## 🏃 Running the Pipeline (Docker Compose)
 
-To execute the data ingestion, ETL processing, AI analysis, PowerPoint/Power BI compilation, and the SQL Chat agent, run:
-```bash
-python main.py
-```
+To build the environment, initialize the PostgreSQL database, execute all data processing layers, generate Power BI/PowerPoint reports, and start the SQL chat agent:
 
-### What Happens When You Run `main.py`:
+1. Ensure **Docker Desktop** is running.
+2. Verify that your `.env` contains:
+   - `DATABASE_URL="postgresql://postgres:postgres@db:5432/ecommerce"`
+   - `HOST_WORKSPACE_PATH="d:\AI_workflow_project"` (pointing to your workspace on Windows)
+3. Launch the services:
+   ```bash
+   docker-compose up --build
+   ```
+
+### What Happens When You Run `docker-compose up --build`:
 1. **Mock Data Drop**: Generates mock e-commerce CSV batches (including anomalies/duplicates) in the `landing_zone/` folder.
-2. **Bronze Ingest**: Ingests files into the SQLite database.
-3. **Silver ETL & Auto-Quarantine**: Executes standard SQL cleaning scripts to clean, deduplicate, and auto-quarantine records with specific rejection reasons into a dedicated audit table.
+2. **Bronze Ingest**: Ingests files into the PostgreSQL database.
+3. **Silver ETL & Auto-Quarantine**: Cleanses, deduplicates, and separates rejected records into `quarantine_rejected_sales` for review.
 4. **Gold Aggregations**: Builds business-tier metrics using advanced window functions.
-5. **Data Quality Audits**: Validates record counts, null violations, auto-quarantine breakdowns, and reconciles revenue numbers across layers.
+5. **Data Quality Audits**: Validates record counts, null violations, quarantine statistics, and reconciles revenue.
 6. **Matplotlib Visuals**: Saves a stylized bar chart of revenue performance to `data/monthly_revenue.png`.
 7. **Power BI Project Creation**: Generates a `.pbip` folder structure with absolute data links customized for your machine.
-8. **Gemini Insights Generation**: Extracts high-level findings and recommendations from the Gold metrics.
-9. **PowerPoint Automation**: Creates a gorgeous 3-slide slide deck in `data/ecommerce_report.pptx`.
-10. **Interactive Agent Loop**: Starts a chat loop in your terminal (`Ask about your data > `) where you can ask any question.
+8. **AI Business Analysis & Insights**: Extracts high-level findings and recommendations using the failover LLM gateway (Google Gemini, fallbacks to NVIDIA Llama 3.1 NIM or OpenAI GPT).
+9. **PowerPoint Automation**: Creates a widescreen PowerPoint deck in `data/ecommerce_report.pptx`.
+10. **Interactive Agent Loop**: Starts an interactive conversational SQL Agent CLI loop inside the terminal container.
 
 ---
 
@@ -153,34 +159,7 @@ The database transformation rules, auto-quarantine remediation path, and SQL Gua
 6. **Query Plan Compiler**: Tests that queries with invalid columns or syntax are successfully detected and blocked via the `EXPLAIN` compiler validation.
 
 ### Run the tests:
-To execute the tests, run:
-```bash
-pytest -v
-```
-
----
-
-## 🐳 Containerization & PostgreSQL Support (Docker Compose)
-
-The pipeline is fully containerized and can run against either a local SQLite database or a production PostgreSQL database instance.
-
-### 1. Run with Default SQLite (Natively)
-By default, leaving `DATABASE_URL` commented out in your `.env` routes all data to a local SQLite database file at `data/ecommerce.db`.
-```bash
-python main.py
-```
-
-### 2. Run with PostgreSQL (Docker Compose)
-To spin up a PostgreSQL container and execute the pipeline:
-1. Make sure **Docker Desktop** is running.
-2. In your `.env` file, configure `HOST_WORKSPACE_PATH` to point to your project workspace directory (e.g. `d:\AI_workflow_project`) so the container can output files and Power BI paths.
-3. Build and launch the container cluster:
-   ```bash
-   docker-compose up --build
-   ```
-This automatically downloads PostgreSQL, initializes the database schemas, runs the Python ETL pipeline (ingesting Bronze, transforming Silver, and aggregating Gold), runs Data Quality Audits, exports Power BI metadata, outputs Matplotlib charts and PowerPoint reports directly to your host's filesystem, and opens the interactive SQL Agent CLI chat.
-
-To run tests inside the Docker container:
+To execute the tests inside the Docker container, run:
 ```bash
 docker-compose run app pytest -v
 ```
