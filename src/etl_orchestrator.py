@@ -131,8 +131,18 @@ class ETLPipeline:
         
         conn = self.db.get_connection()
         df_str = df.astype(str)
-        # pandas to_sql dynamically generates inserts for both SQLite and psycopg2 connections
-        df_str.to_sql("bronze_raw_sales", conn, if_exists="append", index=False)
+        
+        # Determine parameter placeholder based on dialect (PostgreSQL: %s, SQLite: ?)
+        placeholder = "%s" if self.db.dialect == "postgres" else "?"
+        columns = list(df_str.columns)
+        placeholders_str = ", ".join([placeholder] * len(columns))
+        columns_str = ", ".join(columns)
+        
+        insert_query = f"INSERT INTO bronze_raw_sales ({columns_str}) VALUES ({placeholders_str})"
+        records = [tuple(row) for row in df_str.values]
+        
+        cursor = conn.cursor()
+        cursor.executemany(insert_query, records)
         conn.commit()
         conn.close()
         logger.info(f"Bronze Ingestion: Loaded {len(df)} rows from {filename}.")
