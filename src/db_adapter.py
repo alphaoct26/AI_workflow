@@ -14,17 +14,35 @@ class DatabaseAdapter:
     def __init__(self):
         # Read from environment
         self.database_url = os.environ.get("DATABASE_URL")
+        self.dialect = "sqlite"
+        self.db_path = DB_PATH
         
         if self.database_url and (self.database_url.startswith("postgresql://") or self.database_url.startswith("postgres://")):
-            self.dialect = "postgres"
             # Normalize database URL scheme for psycopg2 (replace postgres:// with postgresql://)
             if self.database_url.startswith("postgres://"):
                 self.database_url = self.database_url.replace("postgres://", "postgresql://", 1)
-            logger.info("Database Adapter: Initialized with PostgreSQL.")
+            
+            # Verify if PostgreSQL is reachable
+            try:
+                import psycopg2
+                # Attempt to establish connection with a short timeout
+                conn = psycopg2.connect(self.database_url, connect_timeout=3)
+                conn.close()
+                self.dialect = "postgres"
+                logger.info("Database Adapter: Successfully connected to PostgreSQL.")
+            except Exception as e:
+                logger.warning(
+                    f"\n{'!'*60}\n"
+                    f" [WARNING] PostgreSQL connection failed: {e}\n"
+                    f" Falling back to local SQLite database.\n"
+                    f"{'!'*60}\n"
+                )
+                self.dialect = "sqlite"
+                self.db_path = DB_PATH
         else:
             self.dialect = "sqlite"
             self.db_path = DB_PATH
-            logger.info(f"Database Adapter: Initialized with SQLite. Path: {self.db_path}")
+            logger.info(f"Database Adapter: Operating with SQLite. Path: {self.db_path}")
 
     def get_connection(self):
         """Returns a native database connection based on the dialect."""
