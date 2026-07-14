@@ -157,17 +157,39 @@ isolated in-memory SQLite database:
 ## 10. Execution Flow: Step-by-Step
 "Here is the exact lifecycle of a run:
 1. User drops new sales CSVs into the landing_zone/ folder.
-2. main.py is executed, securely loading credentials from `.env`.
-3. SQLite schemas are initialized.
+2. main.py is executed (either natively on the host or inside a Docker container), securely loading credentials from `.env`.
+3. The Database Adapter connects to SQLite (local) or PostgreSQL (production container) depending on whether DATABASE_URL is set.
 4. Bronze layer ingests the raw files and logs the source.
 5. Silver layer cleans and separates validated rows into 'silver_clean_sales' and 
    quarantines rejected ones into 'quarantine_rejected_sales' with reasons.
 6. Gold layer calculates monthly metrics and top categories.
 7. Data Quality Audit reconciles revenues and prints the quarantined breakdown.
 8. Matplotlib renders the monthly chart and exports it.
-9. Power BI Project generator writes the launcher and links local datasets.
+9. Power BI Project generator writes the launcher and links local datasets, utilizing 
+   HOST_WORKSPACE_PATH overrides to keep host file paths valid when running inside containers.
 10. The LLM Gateway calls the active provider, retrieves structured business 
     insights, and python-pptx compiles the slides.
 11. The Interactive SQL Agent chat starts in the terminal, ready to answer questions.
 12. Developers run `pytest -v` to verify database transformation, safety, and plan compiler rules."
+
+---
+
+## 11. Dual-Database Adapter (SQLite & PostgreSQL Support)
+"To prove that this isn't just a simple script but a production-grade system, I implemented 
+a unified Database Adapter. By checking the `DATABASE_URL` environment variable, the pipeline 
+dynamically switches from local SQLite storage to a production PostgreSQL database. I handled 
+complex SQL dialect differences—like PostgreSQL's serial keys, type casting, date formatting, 
+and string-to-month TO_CHAR converters—completely behind the scenes in the adapter layer. This 
+lets you deploy the same code into development, staging, or production without edits."
+
+---
+
+## 12. Docker Containerization & Multi-Container Architecture
+"To solve the classic 'works on my machine' problem, I containerized the entire application. 
+Using `docker-compose.yml`, we spin up a multi-container network containing the PostgreSQL database 
+and the Python ETL application. To solve the issue where Linux container absolute file paths block 
+Power BI Desktop on the Windows host, the code reads a `HOST_WORKSPACE_PATH` environment variable. 
+It uses this variable to map relative container files directly back to host-side Windows paths inside 
+the generated Power BI semantic model. This ensures Power BI refreshes perfectly on your Windows desktop 
+even if the entire data pipeline is running inside a Dockerized Linux container."
 ================================================================================

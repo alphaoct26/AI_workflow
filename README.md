@@ -157,3 +157,30 @@ To execute the tests, run:
 ```bash
 pytest -v
 ```
+
+---
+
+## 🐳 Containerization & PostgreSQL Support (Docker Compose)
+
+The pipeline is fully containerized and can run against either a local SQLite database or a production PostgreSQL database instance.
+
+### 1. Run with Default SQLite (Natively)
+By default, leaving `DATABASE_URL` commented out in your `.env` routes all data to a local SQLite database file at `data/ecommerce.db`.
+```bash
+python main.py
+```
+
+### 2. Run with PostgreSQL (Docker Compose)
+To spin up a PostgreSQL container and execute the pipeline:
+1. Make sure **Docker Desktop** is running.
+2. In your `.env` file, configure `HOST_WORKSPACE_PATH` to point to your project workspace directory (e.g. `d:\AI_workflow_project`) so the container can output files and Power BI paths.
+3. Build and launch the container cluster:
+   ```bash
+   docker-compose up --build
+   ```
+This automatically downloads PostgreSQL, initializes the database schemas, runs the Python ETL pipeline (ingesting Bronze, transforming Silver, and aggregating Gold), runs Data Quality Audits, exports Power BI metadata, outputs Matplotlib charts and PowerPoint reports directly to your host's filesystem, and opens the interactive SQL Agent CLI chat.
+
+To run tests inside the Docker container:
+```bash
+docker-compose run app pytest -v
+```

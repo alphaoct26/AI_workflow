@@ -1,7 +1,8 @@
 import json
 import logging
+import os
 from pathlib import Path
-from src.config import POWERBI_DIR, CLEAN_CSV_PATH, GOLD_CSV_PATH
+from src.config import POWERBI_DIR, CLEAN_CSV_PATH, GOLD_CSV_PATH, BASE_DIR
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -9,6 +10,18 @@ logger = logging.getLogger("PowerBI_Generator")
 
 def get_m_escaped_path(path: Path) -> str:
     """Format file path with double backslashes for Power Query M code compatibility on Windows."""
+    # Check if host override path is configured (e.g. running inside Docker but Power BI on Windows)
+    host_workspace = os.environ.get("HOST_WORKSPACE_PATH")
+    if host_workspace:
+        try:
+            rel_path = path.resolve().relative_to(BASE_DIR.resolve())
+            host_clean = host_workspace.replace("/", "\\").rstrip("\\")
+            rel_clean = str(rel_path).replace("/", "\\")
+            win_path = f"{host_clean}\\{rel_clean}"
+            return win_path.replace("\\", "\\\\")
+        except Exception as e:
+            logger.warning(f"Failed to map relative path to HOST_WORKSPACE_PATH: {e}")
+            
     abs_path = path.resolve().absolute()
     # Replace any forward slash (standard in Python Path) with standard Windows backslashes
     win_path = str(abs_path).replace("/", "\\")

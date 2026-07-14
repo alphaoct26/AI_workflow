@@ -13,6 +13,8 @@ logger = logging.getLogger("ETL_Orchestrator")
 
 class ETLPipeline:
     def __init__(self):
+        from src.db_adapter import DatabaseAdapter
+        self.db = DatabaseAdapter()
         self.db_path = str(DB_PATH)
 
     def generate_mock_csvs(self):
@@ -105,66 +107,15 @@ class ETLPipeline:
         return [batch_1_file, batch_2_file]
 
     def create_schema(self):
-        """Creates tables for Bronze, Silver, and Gold layers in SQLite database."""
+        """Creates tables for Bronze, Silver, Gold, and Quarantine layers using the DB Adapter."""
         logger.info("Initializing database schemas...")
-        conn = sqlite3.connect(self.db_path)
+        conn = self.db.get_connection()
         cursor = conn.cursor()
         
-        # 1. Bronze: Raw landing layer
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS bronze_raw_sales (
-                date TEXT,
-                category TEXT,
-                revenue TEXT,
-                cost TEXT,
-                units_sold TEXT,
-                ingested_at TIMESTAMP,
-                source_file TEXT
-            )
-        """)
-        
-        # 2. Silver: Cleaned structured layer
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS silver_clean_sales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date DATE,
-                category TEXT,
-                revenue REAL,
-                cost REAL,
-                units_sold INTEGER,
-                profit REAL,
-                cleaned_at TIMESTAMP
-            )
-        """)
-        
-        # 2b. Quarantine: Auto-quarantined rejected rows for review
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS quarantine_rejected_sales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                raw_date TEXT,
-                raw_category TEXT,
-                raw_revenue TEXT,
-                raw_cost TEXT,
-                raw_units_sold TEXT,
-                source_file TEXT,
-                ingested_at TEXT,
-                rejection_reason TEXT,
-                quarantined_at TIMESTAMP
-            )
-        """)
-        
-        # 3. Gold: Analytical aggregated metrics
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS gold_monthly_metrics (
-                month TEXT PRIMARY KEY,
-                revenue REAL,
-                cost REAL,
-                profit_margin REAL,
-                units_sold INTEGER,
-                top_category TEXT
-            )
-        """)
-        
+        queries = self.db.get_schema_queries()
+        for q in queries:
+            cursor.execute(q)
+            
         conn.commit()
         conn.close()
         logger.info("Database schemas initialized.")
@@ -178,10 +129,11 @@ class ETLPipeline:
         df["ingested_at"] = datetime.now().isoformat()
         df["source_file"] = filename
         
-        conn = sqlite3.connect(self.db_path)
-        # Convert all to string in Bronze to mimic raw ingestion
+        conn = self.db.get_connection()
         df_str = df.astype(str)
+        # pandas to_sql dynamically generates inserts for both SQLite and psycopg2 connections
         df_str.to_sql("bronze_raw_sales", conn, if_exists="append", index=False)
+        conn.commit()
         conn.close()
         logger.info(f"Bronze Ingestion: Loaded {len(df)} rows from {filename}.")
 
@@ -192,7 +144,7 @@ class ETLPipeline:
         converts types, filters negatives, and populates the Silver layer.
         """
         logger.info("Silver Transformation: Cleansing, sorting, and quarantining data...")
-        conn = sqlite3.connect(self.db_path)
+        conn = self.db.get_connection()
         cursor = conn.cursor()
         
         # Clear existing Silver and Quarantine tables to prevent duplicates on rerun
@@ -200,91 +152,12 @@ class ETLPipeline:
         cursor.execute("DELETE FROM quarantine_rejected_sales")
         
         # 1. Extract and auto-quarantine records failing validations
-        quarantine_insert_sql = """
-            INSERT INTO quarantine_rejected_sales (
-                raw_date, raw_category, raw_revenue, raw_cost, raw_units_sold, 
-                source_file, ingested_at, rejection_reason, quarantined_at
-            )
-            -- Case 1: Missing Date
-            SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
-                   'Missing/Invalid Date', datetime('now')
-            FROM bronze_raw_sales
-            WHERE date IS NULL OR date = 'None' OR date = ''
-            UNION ALL
-            -- Case 2: Missing Category
-            SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
-                   'Missing/Invalid Category', datetime('now')
-            FROM bronze_raw_sales
-            WHERE (date IS NOT NULL AND date != 'None' AND date != '')
-              AND (category IS NULL OR category = 'None' OR category = '')
-            UNION ALL
-            -- Case 3: Negative Financial Metrics
-            SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
-                   'Negative Numeric Metric(s)', datetime('now')
-            FROM bronze_raw_sales
-            WHERE (date IS NOT NULL AND date != 'None' AND date != '')
-              AND (category IS NOT NULL AND category != 'None' AND category != '')
-              AND (CAST(revenue AS REAL) < 0 OR CAST(cost AS REAL) < 0 OR CAST(units_sold AS INTEGER) < 0)
-            UNION ALL
-            -- Case 4: Duplicate Transactions (rn > 1)
-            SELECT date, category, revenue, cost, units_sold, source_file, ingested_at, 
-                   'Duplicate Transaction', datetime('now')
-            FROM (
-                SELECT *,
-                       ROW_NUMBER() OVER(
-                           PARTITION BY date, category, units_sold, revenue 
-                           ORDER BY ingested_at DESC
-                       ) as rn
-                FROM bronze_raw_sales
-                WHERE date IS NOT NULL AND date != 'None' AND date != ''
-                  AND category IS NOT NULL AND category != 'None' AND category != ''
-            )
-            WHERE rn > 1 
-              AND CAST(revenue AS REAL) >= 0 
-              AND CAST(cost AS REAL) >= 0 
-              AND CAST(units_sold AS INTEGER) >= 0;
-        """
-        cursor.execute(quarantine_insert_sql)
+        quarantine_sql = self.db.get_quarantine_transform_query()
+        cursor.execute(quarantine_sql)
         
         # 2. SQL-based ETL transformation inserting only validated clean records
-        silver_insert_sql = """
-            WITH ranked_bronze AS (
-                SELECT 
-                    date,
-                    category,
-                    CAST(revenue AS REAL) as clean_revenue,
-                    CAST(cost AS REAL) as clean_cost,
-                    CAST(units_sold AS INTEGER) as clean_units,
-                    ingested_at,
-                    source_file,
-                    ROW_NUMBER() OVER(
-                        PARTITION BY date, category, units_sold, revenue 
-                        ORDER BY ingested_at DESC
-                    ) as rn
-                FROM bronze_raw_sales
-                WHERE date IS NOT NULL 
-                  AND date != 'None' 
-                  AND date != ''
-                  AND category IS NOT NULL 
-                  AND category != 'None' 
-                  AND category != ''
-            )
-            INSERT INTO silver_clean_sales (date, category, revenue, cost, units_sold, profit, cleaned_at)
-            SELECT 
-                date(date) as date,
-                category,
-                clean_revenue,
-                clean_cost,
-                clean_units,
-                (clean_revenue - clean_cost) as profit,
-                datetime('now') as cleaned_at
-            FROM ranked_bronze
-            WHERE rn = 1 
-              AND clean_revenue >= 0 
-              AND clean_cost >= 0 
-              AND clean_units >= 0;
-        """
-        cursor.execute(silver_insert_sql)
+        silver_sql = self.db.get_silver_transform_query()
+        cursor.execute(silver_sql)
         conn.commit()
         
         # Fetch status
@@ -299,61 +172,22 @@ class ETLPipeline:
     def run_gold_aggregation(self):
         """
         Transforms Silver -> Gold.
-        Aggregates metrics to monthly level and calculates profit margins and top categories using complex SQL.
+        Aggregates metrics to monthly level and calculates profit margins and top categories using dialect-specific SQL.
         """
         logger.info("Gold Aggregation: Synthesizing monthly business aggregates...")
-        conn = sqlite3.connect(self.db_path)
+        conn = self.db.get_connection()
         cursor = conn.cursor()
         
         # Clear existing Gold table
         cursor.execute("DELETE FROM gold_monthly_metrics")
         
-        # Gold layer monthly aggregation using CTEs and Window Functions
-        gold_aggregation_sql = """
-            WITH monthly_category_revenue AS (
-                SELECT 
-                    strftime('%Y-%m', date) as month,
-                    category,
-                    SUM(revenue) as cat_revenue,
-                    ROW_NUMBER() OVER(
-                        PARTITION BY strftime('%Y-%m', date) 
-                        ORDER BY SUM(revenue) DESC
-                    ) as rn
-                FROM silver_clean_sales
-                GROUP BY 1, 2
-            ),
-            top_categories AS (
-                SELECT month, category
-                FROM monthly_category_revenue
-                WHERE rn = 1
-            ),
-            monthly_aggregates AS (
-                SELECT
-                    strftime('%Y-%m', date) as month,
-                    SUM(revenue) as total_revenue,
-                    SUM(cost) as total_cost,
-                    SUM(units_sold) as total_units
-                FROM silver_clean_sales
-                GROUP BY 1
-            )
-            INSERT INTO gold_monthly_metrics (month, revenue, cost, profit_margin, units_sold, top_category)
-            SELECT 
-                m.month,
-                ROUND(m.total_revenue, 2),
-                ROUND(m.total_cost, 2),
-                ROUND((m.total_revenue - m.total_cost) / m.total_revenue, 4) as profit_margin,
-                m.total_units,
-                t.category as top_category
-            FROM monthly_aggregates m
-            JOIN top_categories t ON m.month = t.month
-            ORDER BY m.month ASC;
-        """
-        
-        cursor.execute(gold_aggregation_sql)
+        # Execute gold aggregation SQL
+        gold_sql = self.db.get_gold_aggregation_query()
+        cursor.execute(gold_sql)
         conn.commit()
         
         # Log aggregated months
-        cursor.execute("SELECT * FROM gold_monthly_metrics")
+        cursor.execute("SELECT month, revenue, cost, profit_margin, units_sold, top_category FROM gold_monthly_metrics ORDER BY month ASC")
         rows = cursor.fetchall()
         for row in rows:
             logger.info(f"Gold Aggregation: Month: {row[0]} | Revenue: ${row[1]:,.2f} | Margin: {row[3]*100:.1f}% | Top Category: {row[5]}")
@@ -364,7 +198,7 @@ class ETLPipeline:
     def export_gold_to_csv(self):
         """Exports Clean Silver and Gold metrics to CSV for Power BI visualization compatibility."""
         logger.info("Exporting tables to CSV for Power BI compatibility...")
-        conn = sqlite3.connect(self.db_path)
+        conn = self.db.get_connection()
         
         # Export Silver clean
         df_silver = pd.read_sql_query("SELECT * FROM silver_clean_sales", conn)
@@ -383,7 +217,7 @@ class ETLPipeline:
         Performs audit logs comparing Row Counts, Null Violations, and Total Financial Reconciliation.
         """
         logger.info("Running Data Quality (DQ) Audits...")
-        conn = sqlite3.connect(self.db_path)
+        conn = self.db.get_connection()
         cursor = conn.cursor()
         
         audit_results = {}
