@@ -59,14 +59,15 @@ def main():
     generate_powerbi_project()
     
     # 11. Check Gemini API key for AI Insights and PowerPoint generation
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
+    from src.config import get_api_keys
+    api_keys = get_api_keys()
+    if not api_keys:
         print("\n" + "!"*60)
-        print(" [WARNING] GEMINI_API_KEY environment variable is not set!")
+        print(" [WARNING] No Gemini API keys found (Environment variable missing and gemini_keys.txt empty)!")
         print(" SQLite ETL, Matplotlib Chart, and Power BI project were successfully generated.")
         print(f" PowerPoint report generation is skipped due to missing API credentials.")
         print(" To enable the AI Analyst and presentation creation:")
-        print("   Set the GEMINI_API_KEY environment variable and run this script again.")
+        print("   Set the GEMINI_API_KEY environment variable or list your keys in gemini_keys.txt and run again.")
         print("!"*60 + "\n")
         return
         

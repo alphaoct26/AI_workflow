@@ -47,11 +47,6 @@ def run_ai_analysis() -> BusinessInsights:
     Connects to Gemini, sends the Gold-tier aggregate table, and returns 
     structured JSON business insights using strict Pydantic parsing.
     """
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        logger.error("GEMINI_API_KEY environment variable is not set!")
-        raise ValueError("GEMINI_API_KEY environment variable is missing. Please set it to run the AI analysis.")
-
     logger.info("Extracting Gold data and preparing prompt for Gemini...")
     data_table = extract_gold_data_as_text()
     
@@ -73,11 +68,7 @@ def run_ai_analysis() -> BusinessInsights:
     - Format your response exactly to fit the requested JSON schema.
     """
 
-    logger.info(f"Sending prompt to Gemini using model '{GEMINI_MODEL}'...")
-    try:
-        # Initialize the official Google GenAI Client
-        client = genai.Client(http_options=types.HttpOptions(timeout=30000))
-        
+    def api_call(client) -> BusinessInsights:
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
@@ -87,18 +78,13 @@ def run_ai_analysis() -> BusinessInsights:
                 temperature=0.1,  # Low temperature for highly analytical factual output
             ),
         )
-        
-        logger.info("Successfully received response from Gemini API.")
-        
-        # Parse output into the Pydantic model
-        insights = BusinessInsights.model_validate_json(response.text)
-        
-        logger.info("Successfully parsed and validated Business Insights JSON.")
+        return BusinessInsights.model_validate_json(response.text)
+
+    logger.info(f"Sending prompt to Gemini using model '{GEMINI_MODEL}' (with key rotation support)...")
+    try:
+        from src.config import execute_with_retry
+        insights = execute_with_retry(api_call)
         return insights
-        
-    except APIError as e:
-        logger.error(f"Gemini API Error occurred: {e}")
-        raise e
     except Exception as e:
         logger.error(f"An unexpected error occurred during LLM invocation: {e}")
         raise e

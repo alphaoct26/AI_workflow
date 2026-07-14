@@ -161,33 +161,40 @@ def ask_llm_to_explain_results(client, question: str, sql_query: str, columns: l
     )
     return response.text
 
-def process_agent_query(client, user_question: str, schema_info: str) -> str:
+def process_agent_query(user_question: str, schema_info: str) -> str:
     """Orchestrates Text-to-SQL generation, execution, self-correction, and synthesis."""
-    error_msg = None
-    sql_query = None
     
-    # Try up to 3 times to correct SQL syntax if it errors
-    for attempt in range(3):
-        try:
-            sql_query = ask_llm_for_sql(client, user_question, schema_info, error_msg)
-            logger.info(f"Agent generated SQL (Attempt {attempt+1}):\n{sql_query}")
-            
-            # Execute
-            columns, rows = execute_query(sql_query)
-            logger.info(f"Query succeeded. Returned {len(rows)} rows.")
-            
-            # Synthesize final answer
-            answer = ask_llm_to_explain_results(client, user_question, sql_query, columns, rows)
-            return f"\n[SQL Executed]\n```sql\n{sql_query}\n```\n\n[AI Answer]\n{answer}"
-            
-        except sqlite3.Error as db_err:
-            error_msg = str(db_err)
-            logger.warning(f"SQL execution failed on attempt {attempt+1} with error: {error_msg}")
-        except Exception as e:
-            logger.error(f"Unexpected query error on attempt {attempt+1}: {e}")
-            return f"Error executing query: {e}"
-            
-    return f"Unable to generate valid SQL query after 3 attempts.\nLast error: {error_msg}\nLast SQL: {sql_query}"
+    def run_agent(client) -> str:
+        error_msg = None
+        sql_query = None
+        
+        # Try up to 3 times to correct SQL syntax if it errors
+        for attempt in range(3):
+            try:
+                sql_query = ask_llm_for_sql(client, user_question, schema_info, error_msg)
+                logger.info(f"Agent generated SQL (Attempt {attempt+1}):\n{sql_query}")
+                
+                # Execute
+                columns, rows = execute_query(sql_query)
+                logger.info(f"Query succeeded. Returned {len(rows)} rows.")
+                
+                # Synthesize final answer
+                answer = ask_llm_to_explain_results(client, user_question, sql_query, columns, rows)
+                return f"\n[SQL Executed]\n```sql\n{sql_query}\n```\n\n[AI Answer]\n{answer}"
+                
+            except sqlite3.Error as db_err:
+                error_msg = str(db_err)
+                logger.warning(f"SQL execution failed on attempt {attempt+1} with error: {error_msg}")
+            except Exception as e:
+                logger.error(f"Unexpected query error on attempt {attempt+1}: {e}")
+                raise e
+        return f"Unable to generate valid SQL query after 3 attempts.\nLast error: {error_msg}\nLast SQL: {sql_query}"
+
+    from src.config import execute_with_retry
+    try:
+        return execute_with_retry(run_agent)
+    except Exception as e:
+        return f"Error executing agent query: {e}"
 
 def start_chat_loop():
     """Starts the interactive CLI session allowing the user to talk directly to the SQLite database."""
@@ -197,14 +204,13 @@ def start_chat_loop():
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(line_buffering=True)
         
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("\n[WARNING] GEMINI_API_KEY environment variable is not set.")
-        print("Please set GEMINI_API_KEY to start chatting with your database.")
+    from src.config import get_api_keys
+    keys = get_api_keys()
+    if not keys:
+        print("\n[WARNING] No GEMINI_API_KEY set (Environment variable missing and gemini_keys.txt not found).")
+        print("Please set GEMINI_API_KEY env var or list your keys in gemini_keys.txt to use the Chat Agent.")
         return
 
-    client = genai.Client(http_options=types.HttpOptions(timeout=30000))
-    
     print("\n" + "="*60)
     print("      Welcome to the Interactive SQL Analytics Agent")
     print("      You can ask questions about Bronze, Silver, or Gold tables.")
@@ -227,7 +233,7 @@ def start_chat_loop():
                 break
                 
             print("Thinking...")
-            response = process_agent_query(client, user_input, schema_info)
+            response = process_agent_query(user_input, schema_info)
             print(response)
             print("-"*60)
             
