@@ -2,6 +2,7 @@ import sqlite3
 import os
 import re
 import logging
+import pandas as pd
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
