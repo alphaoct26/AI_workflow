@@ -44,10 +44,10 @@ def extract_gold_data_as_text() -> str:
 
 def run_ai_analysis() -> BusinessInsights:
     """
-    Connects to Gemini, sends the Gold-tier aggregate table, and returns 
-    structured JSON business insights using strict Pydantic parsing.
+    Retrieves business insights by calling the unified multi-LLM gateway 
+    and parsing the validated JSON response into the Pydantic model.
     """
-    logger.info("Extracting Gold data and preparing prompt for Gemini...")
+    logger.info("Extracting Gold data and preparing prompt for LLM Gateway...")
     data_table = extract_gold_data_as_text()
     
     prompt = f"""
@@ -65,26 +65,20 @@ def run_ai_analysis() -> BusinessInsights:
     
     Rules:
     - Base all conclusions STRICTLY on the data provided in the table. Do not make up external market trends.
-    - Format your response exactly to fit the requested JSON schema.
+    - Format your response exactly as a JSON object with these keys: "executive_summary", "key_findings" (list of strings), and "recommended_actions" (list of strings).
     """
 
-    def api_call(client) -> BusinessInsights:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=BusinessInsights,
-                temperature=0.1,  # Low temperature for highly analytical factual output
-            ),
-        )
-        return BusinessInsights.model_validate_json(response.text)
-
-    logger.info(f"Sending prompt to Gemini using model '{GEMINI_MODEL}' (with key rotation support)...")
     try:
-        from src.config import execute_with_retry
-        insights = execute_with_retry(api_call)
+        from src.llm_gateway import generate_llm_response
+        response_text = generate_llm_response(
+            prompt=prompt,
+            response_schema=BusinessInsights
+        )
+        
+        # Parse output into the Pydantic model
+        insights = BusinessInsights.model_validate_json(response_text)
+        logger.info("Successfully validated AI Business Insights.")
         return insights
     except Exception as e:
-        logger.error(f"An unexpected error occurred during LLM invocation: {e}")
+        logger.error(f"Failed to generate and parse AI Business Insights: {e}")
         raise e

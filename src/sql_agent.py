@@ -72,7 +72,7 @@ def clean_sql_query(raw_query: str) -> str:
     query = query.replace("\\n", "\n").replace("\\t", "\t")
     return query
 
-def ask_llm_for_sql(client, question: str, schema_info: str, error_msg: str = None) -> str:
+def ask_llm_for_sql(question: str, schema_info: str, error_msg: str = None) -> str:
     """Asks the LLM to generate an SQL query. Feeds back errors for auto-correction if provided."""
     system_instruction = (
         "You are an expert SQL Translator for SQLite. "
@@ -107,15 +107,9 @@ def ask_llm_for_sql(client, question: str, schema_info: str, error_msg: str = No
     - Do not use functions or syntax that SQLite doesn't support.
     """
     
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.0,  # Deterministic SQL generation
-            system_instruction=system_instruction
-        )
-    )
-    return clean_sql_query(response.text)
+    from src.llm_gateway import generate_llm_response
+    response_text = generate_llm_response(prompt, system_instruction=system_instruction)
+    return clean_sql_query(response_text)
 
 def execute_query(sql_query: str):
     """Executes SQL against SQLite and returns column names and rows, or raises an exception."""
@@ -131,8 +125,8 @@ def execute_query(sql_query: str):
         conn.close()
         raise e
 
-def ask_llm_to_explain_results(client, question: str, sql_query: str, columns: list, rows: list) -> str:
-    """Sends the raw SQL query, columns, and rows back to Gemini to explain in natural language."""
+def ask_llm_to_explain_results(question: str, sql_query: str, columns: list, rows: list) -> str:
+    """Sends the raw SQL query, columns, and rows back to the LLM to explain in natural language."""
     formatted_results = "Empty Result Set"
     if rows:
         df = pd.DataFrame(rows, columns=columns)
@@ -154,47 +148,36 @@ def ask_llm_to_explain_results(client, question: str, sql_query: str, columns: l
     State the exact figures and summarize what they mean for the business. Keep it concise.
     """
     
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(temperature=0.3)
-    )
-    return response.text
+    from src.llm_gateway import generate_llm_response
+    return generate_llm_response(prompt)
 
 def process_agent_query(user_question: str, schema_info: str) -> str:
     """Orchestrates Text-to-SQL generation, execution, self-correction, and synthesis."""
+    error_msg = None
+    sql_query = None
     
-    def run_agent(client) -> str:
-        error_msg = None
-        sql_query = None
-        
-        # Try up to 3 times to correct SQL syntax if it errors
-        for attempt in range(3):
-            try:
-                sql_query = ask_llm_for_sql(client, user_question, schema_info, error_msg)
-                logger.info(f"Agent generated SQL (Attempt {attempt+1}):\n{sql_query}")
-                
-                # Execute
-                columns, rows = execute_query(sql_query)
-                logger.info(f"Query succeeded. Returned {len(rows)} rows.")
-                
-                # Synthesize final answer
-                answer = ask_llm_to_explain_results(client, user_question, sql_query, columns, rows)
-                return f"\n[SQL Executed]\n```sql\n{sql_query}\n```\n\n[AI Answer]\n{answer}"
-                
-            except sqlite3.Error as db_err:
-                error_msg = str(db_err)
-                logger.warning(f"SQL execution failed on attempt {attempt+1} with error: {error_msg}")
-            except Exception as e:
-                logger.error(f"Unexpected query error on attempt {attempt+1}: {e}")
-                raise e
-        return f"Unable to generate valid SQL query after 3 attempts.\nLast error: {error_msg}\nLast SQL: {sql_query}"
-
-    from src.config import execute_with_retry
-    try:
-        return execute_with_retry(run_agent)
-    except Exception as e:
-        return f"Error executing agent query: {e}"
+    # Try up to 3 times to correct SQL syntax if it errors
+    for attempt in range(3):
+        try:
+            sql_query = ask_llm_for_sql(user_question, schema_info, error_msg)
+            logger.info(f"Agent generated SQL (Attempt {attempt+1}):\n{sql_query}")
+            
+            # Execute
+            columns, rows = execute_query(sql_query)
+            logger.info(f"Query succeeded. Returned {len(rows)} rows.")
+            
+            # Synthesize final answer
+            answer = ask_llm_to_explain_results(user_question, sql_query, columns, rows)
+            return f"\n[SQL Executed]\n```sql\n{sql_query}\n```\n\n[AI Answer]\n{answer}"
+            
+        except sqlite3.Error as db_err:
+            error_msg = str(db_err)
+            logger.warning(f"SQL execution failed on attempt {attempt+1} with error: {error_msg}")
+        except Exception as e:
+            logger.error(f"Unexpected query error on attempt {attempt+1}: {e}")
+            return f"Error executing query: {e}"
+            
+    return f"Unable to generate valid SQL query after 3 attempts.\nLast error: {error_msg}\nLast SQL: {sql_query}"
 
 def start_chat_loop():
     """Starts the interactive CLI session allowing the user to talk directly to the SQLite database."""
@@ -204,11 +187,10 @@ def start_chat_loop():
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(line_buffering=True)
         
-    from src.config import get_api_keys
-    keys = get_api_keys()
-    if not keys:
-        print("\n[WARNING] No GEMINI_API_KEY set (Environment variable missing and gemini_keys.txt not found).")
-        print("Please set GEMINI_API_KEY env var or list your keys in gemini_keys.txt to use the Chat Agent.")
+    from src.llm_gateway import get_llm_providers
+    providers = get_llm_providers()
+    if not providers:
+        print("\n[WARNING] No LLM provider credentials configured. Please edit llm_keys.txt or set environment variables.")
         return
 
     print("\n" + "="*60)
