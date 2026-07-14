@@ -252,12 +252,9 @@ def process_agent_query(user_question: str, schema_info: str) -> str:
             answer = ask_llm_to_explain_results(user_question, sql_query, columns, rows)
             return f"\n[SQL Executed]\n```sql\n{sql_query}\n```\n\n[AI Answer]\n{answer}"
             
-        except sqlite3.Error as db_err:
+        except Exception as db_err:
             error_msg = str(db_err)
             logger.warning(f"SQL execution failed on attempt {attempt+1} with error: {error_msg}")
-        except Exception as e:
-            logger.error(f"Unexpected query error on attempt {attempt+1}: {e}")
-            return f"Error executing query: {e}"
             
     return f"Unable to generate valid SQL query after 3 attempts.\nLast error: {error_msg}\nLast SQL: {sql_query}"
 
