@@ -58,16 +58,16 @@ def main():
     # 10. Generate Power BI Project Folder
     generate_powerbi_project()
     
-    # 11. Check Gemini API key for AI Insights and PowerPoint generation
-    from src.config import get_api_keys
-    api_keys = get_api_keys()
-    if not api_keys:
+    # 11. Check API credentials for AI Insights and PowerPoint generation
+    from src.llm_gateway import get_llm_providers
+    providers = get_llm_providers()
+    if not providers:
         print("\n" + "!"*60)
-        print(" [WARNING] No Gemini API keys found (Environment variable missing and gemini_keys.txt empty)!")
+        print(" [WARNING] No LLM provider credentials configured in environment variables!")
         print(" SQLite ETL, Matplotlib Chart, and Power BI project were successfully generated.")
         print(f" PowerPoint report generation is skipped due to missing API credentials.")
         print(" To enable the AI Analyst and presentation creation:")
-        print("   Set the GEMINI_API_KEY environment variable or list your keys in gemini_keys.txt and run again.")
+        print("   Configure GEMINI_API_KEYS, ANTHROPIC_API_KEY, NVIDIA_API_KEY, or OPENAI_API_KEY in your .env.")
         print("!"*60 + "\n")
         return
         
