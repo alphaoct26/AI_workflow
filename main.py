@@ -13,6 +13,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger("Pipeline_Orchestrator")
 
 def main():
+    import sys
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(line_buffering=True)
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(line_buffering=True)
+        
     print("="*60)
     print("      Starting E-Commerce Auto-Analyst ETL Pipeline")
     print("="*60)

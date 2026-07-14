@@ -190,6 +190,12 @@ def process_agent_query(client, user_question: str, schema_info: str) -> str:
 
 def start_chat_loop():
     """Starts the interactive CLI session allowing the user to talk directly to the SQLite database."""
+    import sys
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(line_buffering=True)
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(line_buffering=True)
+        
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         print("\n[WARNING] GEMINI_API_KEY environment variable is not set.")
