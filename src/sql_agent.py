@@ -258,6 +258,42 @@ def process_agent_query(user_question: str, schema_info: str, workspace_id: str 
             
     return f"Unable to generate valid SQL query after 3 attempts.\nLast error: {error_msg}\nLast SQL: {sql_query}"
 
+def process_web_agent_query(user_question: str, schema_info: str, workspace_id: str = "default") -> dict:
+    """Orchestrates Text-to-SQL generation and execution, returning structured JSON response for the web app UI."""
+    error_msg = None
+    sql_query = None
+    
+    # Try up to 3 times to correct SQL syntax if it errors
+    for attempt in range(3):
+        try:
+            sql_query = ask_llm_for_sql(user_question, schema_info, error_msg)
+            logger.info(f"Web Agent generated SQL (Attempt {attempt+1}):\n{sql_query}")
+            
+            # Execute
+            columns, rows = execute_query(sql_query, workspace_id)
+            logger.info(f"Web query succeeded. Returned {len(rows)} rows.")
+            
+            # Synthesize final answer
+            answer = ask_llm_to_explain_results(user_question, sql_query, columns, rows)
+            return {
+                "success": True,
+                "sql": sql_query,
+                "columns": columns,
+                "rows": [[str(cell) for cell in row] for row in rows], # ensures serializability of dates/floats
+                "answer": answer
+            }
+            
+        except Exception as db_err:
+            error_msg = str(db_err)
+            logger.warning(f"Web SQL execution failed on attempt {attempt+1} with error: {error_msg}")
+            
+    return {
+        "success": False,
+        "error": error_msg,
+        "sql": sql_query,
+        "answer": f"Unable to generate valid SQL query after 3 attempts.\nLast error: {error_msg}\nLast SQL: {sql_query}"
+    }
+
 def start_chat_loop(workspace_id: str = "default"):
     """Starts the interactive CLI session allowing the user to talk directly to the database."""
     import sys

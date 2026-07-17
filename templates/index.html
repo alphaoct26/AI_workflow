@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Analyst SaaS Dashboard</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0f111a;
+            --sidebar-bg: rgba(20, 24, 38, 0.7);
+            --card-bg: rgba(30, 37, 56, 0.45);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --primary: #6366f1; /* Indigo */
+            --primary-glow: rgba(99, 102, 241, 0.15);
+            --secondary: #0d9488; /* Teal */
+            --danger: #ef4444; /* Coral Red */
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar Styling */
+        .sidebar {
+            width: 280px;
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(16px);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 24px;
+            z-index: 10;
+        }
+
+        .brand-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 36px;
+        }
+
+        .brand-logo {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            color: white;
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.2rem;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+
+        .brand-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.25rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #ffffff, #a5b4fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .sidebar-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
+        .workspace-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+
+        .workspace-item {
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid transparent;
+            transition: all 0.2s ease;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .workspace-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .workspace-item.active {
+            background: var(--primary-glow);
+            border-color: rgba(99, 102, 241, 0.3);
+            color: white;
+        }
+
+        .workspace-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--secondary);
+        }
+
+        .env-badge {
+            margin-top: auto;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .env-badge span {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        /* Main Content Styling */
+        .main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            background: linear-gradient(135deg, #090a0f 0%, #0f111a 100%);
+            padding: 32px;
+            gap: 24px;
+        }
+
+        .header-section {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .dashboard-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.75rem;
+            font-weight: 700;
+        }
+
+        .actions-bar {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+        }
+
+        .btn-primary:hover {
+            background: #4f46e5;
+            transform: translateY(-1px);
+        }
+
+        /* KPIs Grid */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 16px;
+        }
+
+        .kpi-card {
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s ease;
+        }
+
+        .kpi-card:hover {
+            transform: translateY(-2px);
+        }
+
+        .kpi-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--primary);
+        }
+
+        .kpi-card.secondary::after {
+            background: var(--secondary);
+        }
+
+        .kpi-card.danger::after {
+            background: var(--danger);
+        }
+
+        .kpi-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .kpi-value {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        /* Middle Grid Layout */
+        .middle-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 24px;
+            min-height: 400px;
+        }
+
+        .card {
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 12px;
+        }
+
+        .card-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.15rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .chart-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-grow: 1;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            overflow: hidden;
+            min-height: 300px;
+            border: 1px dashed rgba(255, 255, 255, 0.05);
+        }
+
+        .chart-image {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        /* Interactive SQL Chat Terminal */
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            height: 100%;
+            max-height: 420px;
+        }
+
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding-right: 8px;
+            margin-bottom: 12px;
+            max-height: 300px;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .message.user {
+            background: var(--primary);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.agent {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        .sql-box {
+            background: #06070d;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            padding: 10px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.8rem;
+            color: #a5b4fc;
+            margin-top: 8px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+
+        .chat-input-container {
+            display: flex;
+            gap: 8px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 12px;
+        }
+
+        .chat-input {
+            flex-grow: 1;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: white;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+
+        .chat-input:focus {
+            border-color: var(--primary);
+        }
+
+        /* Data Previews / Explorer */
+        .tabs-header {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 8px;
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            padding: 8px 16px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn.active {
+            background: rgba(255, 255, 255, 0.06);
+            color: white;
+        }
+
+        .table-responsive {
+            overflow-x: auto;
+            max-height: 250px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.85rem;
+        }
+
+        th, td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.03);
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .text-teal {
+            color: var(--secondary);
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="brand-container">
+            <div class="brand-logo">A</div>
+            <div class="brand-title">Auto-Analyst</div>
+        </div>
+
+        <h3 class="sidebar-title">Workspaces</h3>
+        <ul class="workspace-list" id="workspaces">
+            <!-- Dynamically populated -->
+        </ul>
+
+        <div class="env-badge">
+            Backend Dialect:
+            <span id="backend-dialect">DuckDB (Local)</span>
+        </div>
+    </div>
+
+    <!-- Main Content Panel -->
+    <div class="main-content">
+        <div class="header-section">
+            <div>
+                <h1 class="dashboard-title" id="current-workspace-title">Workspace Dashboard</h1>
+                <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 4px;">Dynamic medallion pipeline analysis & reporting metrics.</p>
+            </div>
+            <div class="actions-bar" id="report-actions" style="display: none;">
+                <a href="#" class="btn btn-primary" id="download-pptx-btn">
+                    Download Presentation Deck
+                </a>
+            </div>
+        </div>
+
+        <!-- KPIs Grid -->
+        <div class="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-label">Bronze Ingested</div>
+                <div class="kpi-value" id="kpi-bronze">0</div>
+            </div>
+            <div class="kpi-card secondary">
+                <div class="kpi-label">Silver Cleaned</div>
+                <div class="kpi-value" id="kpi-silver">0</div>
+            </div>
+            <div class="kpi-card danger">
+                <div class="kpi-label">Quarantined</div>
+                <div class="kpi-value" id="kpi-quarantine">0</div>
+            </div>
+            <div class="kpi-card secondary">
+                <div class="kpi-label">Total Revenue</div>
+                <div class="kpi-value text-teal" id="kpi-revenue">$0.00</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Avg Profit Margin</div>
+                <div class="kpi-value" id="kpi-margin">0.0%</div>
+            </div>
+        </div>
+
+        <!-- Charts and SQL Chat Grid -->
+        <div class="middle-grid">
+            <!-- Monthly Aggregations Chart Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Dynamic Gold Visualizations</h2>
+                </div>
+                <div class="chart-container" id="chart-wrapper">
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">No visualizations generated.</p>
+                </div>
+            </div>
+
+            <!-- SQL Agent Chat Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Conversational SQL Agent Shell</h2>
+                </div>
+                <div class="chat-container">
+                    <div class="chat-messages" id="chat-box">
+                        <div class="message agent">
+                            Hello! I am your AI Data Agent. Ask me questions about the Bronze raw data, Silver cleaned sales, or Gold aggregation metrics. I will translate your questions into SQL, run them, and compile the insights!
+                        </div>
+                    </div>
+                    <div class="chat-input-container">
+                        <input type="text" class="chat-input" id="chat-input" placeholder="e.g. What was the total units sold for Electronics in March?">
+                        <button class="btn btn-primary" id="chat-send-btn" style="padding: 10px 24px;">Ask</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Explorer Preview Tables -->
+        <div class="card">
+            <div class="card-header" style="border-bottom: none; padding-bottom: 0;">
+                <div class="tabs-header">
+                    <button class="tab-btn active" id="tab-silver" onclick="switchTable('silver')">Silver Cleaned Sales (Preview)</button>
+                    <button class="tab-btn" id="tab-quarantine" onclick="switchTable('quarantine')">Quarantined Rejected Sales (Preview)</button>
+                </div>
+            </div>
+            <div class="table-responsive" id="table-wrapper">
+                <table id="preview-table">
+                    <thead>
+                        <tr><th>No Data Available</th></tr>
+                    </thead>
+                    <tbody>
+                        <!-- Dynamically filled -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script Routing Logic -->
+    <script>
+        let currentWorkspace = "default";
+        let workspaceData = {};
+        let activeTableTab = "silver";
+
+        document.addEventListener("DOMContentLoaded", () => {
+            loadWorkspaces();
+            
+            // Set up chat submit listener
+            document.getElementById("chat-send-btn").addEventListener("click", sendChatMessage);
+            document.getElementById("chat-input").addEventListener("keypress", (e) => {
+                if (e.key === "Enter") sendChatMessage();
+            });
+        });
+
+        // Fetch registered workspaces list
+        async function loadWorkspaces() {
+            try {
+                const res = await fetch("/api/workspaces");
+                const list = await res.json();
+                const container = document.getElementById("workspaces");
+                container.innerHTML = "";
+
+                list.forEach((ws, idx) => {
+                    const li = document.createElement("li");
+                    li.className = `workspace-item ${ws === currentWorkspace ? 'active' : ''}`;
+                    li.textContent = ws;
+                    li.addEventListener("click", () => selectWorkspace(ws));
+                    
+                    const indicator = document.createElement("div");
+                    indicator.className = "workspace-indicator";
+                    li.appendChild(indicator);
+                    container.appendChild(li);
+                });
+
+                selectWorkspace(currentWorkspace);
+            } catch (err) {
+                console.error("Failed to load workspaces list:", err);
+            }
+        }
+
+        // Switch target active workspace
+        async function selectWorkspace(id) {
+            currentWorkspace = id;
+            document.getElementById("current-workspace-title").textContent = `Workspace: ${id}`;
+
+            // Update sidebar highlights
+            const items = document.querySelectorAll(".workspace-item");
+            items.forEach(item => {
+                if (item.firstChild.textContent === id) {
+                    item.classList.add("active");
+                } else {
+                    item.classList.remove("active");
+                }
+            });
+
+            // Fetch metrics
+            try {
+                const res = await fetch(`/api/workspace/${id}`);
+                const data = await res.json();
+                workspaceData = data;
+
+                // Update KPIs
+                document.getElementById("kpi-bronze").textContent = data.kpis.bronze_count.toLocaleString();
+                document.getElementById("kpi-silver").textContent = data.kpis.silver_count.toLocaleString();
+                document.getElementById("kpi-quarantine").textContent = data.kpis.quarantine_count.toLocaleString();
+                document.getElementById("kpi-revenue").textContent = data.kpis.total_revenue;
+                document.getElementById("kpi-margin").textContent = data.kpis.avg_margin;
+
+                // Dialect Badge
+                document.getElementById("backend-dialect").textContent = data.dialect === "postgres" ? "PostgreSQL (Warehouse)" : "DuckDB (Local OLAP)";
+
+                // Set up presentation download
+                const downloadBtn = document.getElementById("download-pptx-btn");
+                const actionsBar = document.getElementById("report-actions");
+                if (data.kpis.has_pptx) {
+                    downloadBtn.href = `/api/workspace/${id}/pptx`;
+                    actionsBar.style.display = "block";
+                } else {
+                    actionsBar.style.display = "none";
+                }
+
+                // Render Chart Image
+                const chartWrapper = document.getElementById("chart-wrapper");
+                if (data.kpis.has_chart) {
+                    chartWrapper.innerHTML = `<img src="/api/workspace/${id}/chart?t=${new Date().getTime()}" class="chart-image" alt="Monthly Metrics Overview">`;
+                } else {
+                    chartWrapper.innerHTML = `<p style="color: var(--text-muted); font-size: 0.9rem;">No visualizations generated. Check the reports folder.</p>`;
+                }
+
+                // Render Preview Table
+                renderPreviewTable();
+
+            } catch (err) {
+                console.error(`Failed to load details for workspace ${id}:`, err);
+            }
+        }
+
+        // Draw dynamic previews inside data tables
+        function renderPreviewTable() {
+            const tableKey = activeTableTab === "silver" ? "silver_clean_sales" : "quarantine_rejected_sales";
+            const tableWrapper = document.getElementById("table-wrapper");
+            const table = document.getElementById("preview-table");
+            const preview = workspaceData.previews ? workspaceData.previews[tableKey] : null;
+
+            if (!preview || !preview.columns || preview.columns.length === 0) {
+                table.innerHTML = `<thead><tr><th>No Preview Data Loaded</th></tr></thead><tbody><tr><td>Query data has not yet run for this layer.</td></tr></tbody>`;
+                return;
+            }
+
+            let theadHtml = "<tr>";
+            preview.columns.forEach(col => {
+                theadHtml += `<th>${col}</th>`;
+            });
+            theadHtml += "</tr>";
+
+            let tbodyHtml = "";
+            if (preview.rows && preview.rows.length > 0) {
+                preview.rows.forEach(row => {
+                    tbodyHtml += "<tr>";
+                    row.forEach(cell => {
+                        tbodyHtml += `<td>${cell !== null ? cell : ''}</td>`;
+                    });
+                    tbodyHtml += "</tr>";
+                });
+            } else {
+                tbodyHtml = `<tr><td colspan="${preview.columns.length}">Table is empty.</td></tr>`;
+            }
+
+            table.innerHTML = `<thead>${theadHtml}</thead><tbody>${tbodyHtml}</tbody>`;
+        }
+
+        // Tab switches
+        function switchTable(tab) {
+            activeTableTab = tab;
+            document.getElementById("tab-silver").className = `tab-btn ${tab === 'silver' ? 'active' : ''}`;
+            document.getElementById("tab-quarantine").className = `tab-btn ${tab === 'quarantine' ? 'active' : ''}`;
+            renderPreviewTable();
+        }
+
+        // Submit chat question to Web Agent endpoint
+        async function sendChatMessage() {
+            const input = document.getElementById("chat-input");
+            const question = input.value.trim();
+            if (!question) return;
+
+            // Display User Message
+            const chatBox = document.getElementById("chat-box");
+            const userMsg = document.createElement("div");
+            userMsg.className = "message user";
+            userMsg.textContent = question;
+            chatBox.appendChild(userMsg);
+            
+            // Clear input
+            input.value = "";
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            // Display Agent Loading
+            const loaderMsg = document.createElement("div");
+            loaderMsg.className = "message agent";
+            loaderMsg.id = "agent-loading-message";
+            loaderMsg.textContent = "AI Agent is compiling SQL plans...";
+            chatBox.appendChild(loaderMsg);
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                const res = await fetch(`/api/workspace/${currentWorkspace}/chat`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ question })
+                });
+                const result = await res.json();
+                
+                // Remove loading
+                loaderMsg.remove();
+
+                const agentMsg = document.createElement("div");
+                agentMsg.className = "message agent";
+                
+                // Construct inner response elements
+                let html = `<p>${result.answer}</p>`;
+                if (result.sql) {
+                    html += `<div class="sql-box"><strong>SQL Query Plan:</strong><br>${result.sql}</div>`;
+                }
+
+                // If rows are returned, draw a sub-table inside the chat answer
+                if (result.columns && result.columns.length > 0 && result.rows && result.rows.length > 0) {
+                    html += `<div class="table-responsive" style="margin-top: 12px; max-height: 180px;">`;
+                    html += `<table style="font-size: 0.75rem;">`;
+                    html += `<thead><tr>`;
+                    result.columns.forEach(col => {
+                        html += `<th style="padding: 6px 10px;">${col}</th>`;
+                    });
+                    html += `</tr></thead><tbody>`;
+                    result.rows.forEach(row => {
+                        html += `<tr>`;
+                        row.forEach(cell => {
+                            html += `<td style="padding: 6px 10px;">${cell}</td>`;
+                        });
+                        html += `</tr>`;
+                    });
+                    html += `</tbody></table></div>`;
+                }
+
+                agentMsg.innerHTML = html;
+                chatBox.appendChild(agentMsg);
+
+            } catch (err) {
+                loaderMsg.remove();
+                const errMsg = document.createElement("div");
+                errMsg.className = "message agent";
+                errMsg.style.borderColor = "var(--danger)";
+                errMsg.textContent = `Error getting response from data agent: ${err}`;
+                chatBox.appendChild(errMsg);
+            }
+
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    </script>
+</body>
+</html>
