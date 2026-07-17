@@ -10,7 +10,10 @@ load_dotenv(BASE_DIR / ".env")
 
 # Folders
 LANDING_ZONE_DIR = BASE_DIR / "landing_zone"
-DATA_DIR = BASE_DIR / "data"
+if os.environ.get("VERCEL") or os.environ.get("NOW_BUILDER"):
+    DATA_DIR = Path("/tmp") / "data"
+else:
+    DATA_DIR = BASE_DIR / "data"
 POWERBI_DIR = BASE_DIR / "PowerBI_Report"
 
 # Database Path
