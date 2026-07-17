@@ -107,7 +107,7 @@ def main():
         print("\n[ERROR] Pipeline completed data steps, but AI generation failed. See log above.")
         
     # 14. Launch the Interactive SQL Agent so the user can talk to the data
-    start_chat_loop()
+    start_chat_loop(workspace_id)
 
 if __name__ == "__main__":
     main()
