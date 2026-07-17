@@ -148,6 +148,7 @@ def test_v1_generic_pipeline(mock_llm, test_db_path, monkeypatch):
     pipeline = ETLPipeline()
     pipeline.db.db_path = test_db_path
     pipeline.schema_profiler.cache_path = profile_cache
+    pipeline.db.profile = None
     
     # run ingest (triggers schema profiling)
     pipeline.run_bronze_ingest(CSV_ECOMMERCE)

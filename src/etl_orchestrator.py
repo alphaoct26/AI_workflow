@@ -14,11 +14,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger("ETL_Orchestrator")
 
 class ETLPipeline:
-    def __init__(self):
+    def __init__(self, workspace_id: str = "default"):
+        self.workspace_id = workspace_id
         from src.db_adapter import DatabaseAdapter
-        self.db = DatabaseAdapter()
-        self.db_path = str(DB_PATH)
-        self.schema_profiler = SchemaProfiler()
+        self.db = DatabaseAdapter(workspace_id)
+        self.db_path = str(self.db.db_path)
+        
+        from src.config import get_workspace_file_paths
+        paths = get_workspace_file_paths(workspace_id)
+        self.schema_profiler = SchemaProfiler(cache_path=paths["profile_json"])
 
     def generate_mock_csvs(self):
         """
@@ -255,16 +259,19 @@ class ETLPipeline:
         logger.info("Exporting tables to CSV for Power BI compatibility...")
         conn = self.db.get_connection()
         
+        from src.config import get_workspace_file_paths
+        paths = get_workspace_file_paths(self.workspace_id)
+        
         # Export Silver clean
         df_silver = pd.read_sql_query("SELECT * FROM silver_clean_sales", conn)
-        df_silver.to_csv(CLEAN_CSV_PATH, index=False)
+        df_silver.to_csv(paths["clean_csv"], index=False)
         
         # Export Gold summary
         df_gold = pd.read_sql_query("SELECT * FROM gold_monthly_metrics", conn)
-        df_gold.to_csv(GOLD_CSV_PATH, index=False)
+        df_gold.to_csv(paths["gold_csv"], index=False)
         
         conn.close()
-        logger.info("CSVs successfully exported to data/ folder.")
+        logger.info(f"CSVs successfully exported to {paths['clean_csv'].parent} folder.")
 
     def run_data_quality_checks(self):
         """

@@ -12,11 +12,14 @@ class DatabaseAdapter:
     Abstracts database connection and dialect-specific queries 
     supporting both DuckDB (local/OLAP) and PostgreSQL (production).
     """
-    def __init__(self):
+    def __init__(self, workspace_id: str = "default"):
         # Read from environment
+        self.workspace_id = workspace_id
         self.database_url = os.environ.get("DATABASE_URL")
         self.dialect = "duckdb"
-        self.db_path = DB_PATH
+        
+        from src.config import get_workspace_db_path, get_workspace_file_paths
+        self.db_path = get_workspace_db_path(workspace_id)
         self.gold_query = None
         
         if self.database_url and (self.database_url.startswith("postgresql://") or self.database_url.startswith("postgres://")):
@@ -31,24 +34,23 @@ class DatabaseAdapter:
                 conn = psycopg2.connect(self.database_url, connect_timeout=3)
                 conn.close()
                 self.dialect = "postgres"
-                logger.info("Database Adapter: Successfully connected to PostgreSQL.")
+                logger.info(f"Database Adapter: Successfully connected to PostgreSQL (workspace: {workspace_id}).")
             except Exception as e:
                 logger.warning(
                     f"\n{'!'*60}\n"
                     f" [WARNING] PostgreSQL connection failed: {e}\n"
-                    f" Falling back to local DuckDB database.\n"
+                    f" Falling back to local DuckDB database (workspace: {workspace_id}).\n"
                     f"{'!'*60}\n"
                 )
                 self.dialect = "duckdb"
-                self.db_path = DB_PATH
         else:
             self.dialect = "duckdb"
-            self.db_path = DB_PATH
-            logger.info(f"Database Adapter: Operating with DuckDB. Path: {self.db_path}")
+            logger.info(f"Database Adapter: Operating with DuckDB (workspace: {workspace_id}). Path: {self.db_path}")
 
-        # Load cached schema profile if it exists
+        # Load cached schema profile if it exists in the workspace
         self.profile = None
-        profile_path = Path(BASE_DIR) / "data" / "schema_profile.json"
+        paths = get_workspace_file_paths(workspace_id)
+        profile_path = paths["profile_json"]
         if profile_path.exists():
             try:
                 with open(profile_path, "r") as f:
@@ -66,10 +68,16 @@ class DatabaseAdapter:
         self.gold_query = query
 
     def get_connection(self):
-        """Returns a native database connection based on the dialect."""
+        """Returns a native database connection based on the dialect, with schema scoping applied."""
         if self.dialect == "postgres":
             import psycopg2
-            return psycopg2.connect(self.database_url)
+            conn = psycopg2.connect(self.database_url)
+            # Create schema if not exists and scope connection to it
+            cursor = conn.cursor()
+            cursor.execute(f"CREATE SCHEMA IF NOT EXISTS workspace_{self.workspace_id}")
+            cursor.execute(f"SET search_path TO workspace_{self.workspace_id}")
+            cursor.close()
+            return conn
         else:
             import duckdb
             # Ensure the parent data directory exists

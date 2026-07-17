@@ -1,4 +1,4 @@
-import sqlite3
+import duckdb
 import pandas as pd
 import os
 import logging
@@ -24,10 +24,10 @@ class BusinessInsights(BaseModel):
         description="A list of 3 to 5 concrete, actionable business recommendations directly tied to the findings."
     )
 
-def extract_gold_data_as_text() -> str:
+def extract_gold_data_as_text(workspace_id: str = "default") -> str:
     """Queries the Gold summary table and formats it as a Markdown table for the LLM."""
     from src.db_adapter import DatabaseAdapter
-    db = DatabaseAdapter()
+    db = DatabaseAdapter(workspace_id)
     
     conn = db.get_connection()
     df = pd.read_sql_query("SELECT * FROM gold_monthly_metrics", conn)
@@ -65,13 +65,13 @@ def extract_gold_data_as_text() -> str:
                 
     return df_formatted.to_markdown(index=False)
 
-def run_ai_analysis() -> BusinessInsights:
+def run_ai_analysis(workspace_id: str = "default") -> BusinessInsights:
     """
     Retrieves business insights by calling the unified multi-LLM gateway 
     and parsing the validated JSON response into the Pydantic model.
     """
     logger.info("Extracting Gold data and preparing prompt for LLM Gateway...")
-    data_table = extract_gold_data_as_text()
+    data_table = extract_gold_data_as_text(workspace_id)
     
     prompt = f"""
     You are a Senior Data Analyst and Strategic Business Advisor.

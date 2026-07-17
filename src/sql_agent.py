@@ -12,13 +12,13 @@ from src.config import GEMINI_MODEL, DB_PATH
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("SQL_Agent")
 
-def get_database_schema() -> str:
+def get_database_schema(workspace_id: str = "default") -> str:
     """
     Connects to the database and extracts table schemas and sample rows 
     for Bronze, Silver, and Gold tables to provide schema context to the LLM.
     """
     from src.db_adapter import DatabaseAdapter
-    db = DatabaseAdapter()
+    db = DatabaseAdapter(workspace_id)
     
     conn = db.get_connection()
     cursor = conn.cursor()
@@ -174,7 +174,7 @@ def is_safe_query(sql_query: str) -> tuple[bool, str]:
         
     return True, ""
 
-def execute_query(sql_query: str):
+def execute_query(sql_query: str, workspace_id: str = "default"):
     """Executes SQL against the database and returns column names and rows, or raises an exception."""
     # 1. Check SQL safety
     is_safe, err_msg = is_safe_query(sql_query)
@@ -182,7 +182,7 @@ def execute_query(sql_query: str):
         raise PermissionError(f"SQL Guard Blocked Query: {err_msg}")
         
     from src.db_adapter import DatabaseAdapter
-    db = DatabaseAdapter()
+    db = DatabaseAdapter(workspace_id)
     conn = db.get_connection()
     
     # 2. LLM Output Validation Layer: Compile/Verify execution plan before running the query
@@ -233,7 +233,7 @@ def ask_llm_to_explain_results(question: str, sql_query: str, columns: list, row
     from src.llm_gateway import generate_llm_response
     return generate_llm_response(prompt)
 
-def process_agent_query(user_question: str, schema_info: str) -> str:
+def process_agent_query(user_question: str, schema_info: str, workspace_id: str = "default") -> str:
     """Orchestrates Text-to-SQL generation, execution, self-correction, and synthesis."""
     error_msg = None
     sql_query = None
@@ -245,7 +245,7 @@ def process_agent_query(user_question: str, schema_info: str) -> str:
             logger.info(f"Agent generated SQL (Attempt {attempt+1}):\n{sql_query}")
             
             # Execute
-            columns, rows = execute_query(sql_query)
+            columns, rows = execute_query(sql_query, workspace_id)
             logger.info(f"Query succeeded. Returned {len(rows)} rows.")
             
             # Synthesize final answer
@@ -258,8 +258,8 @@ def process_agent_query(user_question: str, schema_info: str) -> str:
             
     return f"Unable to generate valid SQL query after 3 attempts.\nLast error: {error_msg}\nLast SQL: {sql_query}"
 
-def start_chat_loop():
-    """Starts the interactive CLI session allowing the user to talk directly to the SQLite database."""
+def start_chat_loop(workspace_id: str = "default"):
+    """Starts the interactive CLI session allowing the user to talk directly to the database."""
     import sys
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(line_buffering=True)
@@ -279,7 +279,7 @@ def start_chat_loop():
     print("="*60)
     
     print("Scanning database schemas...")
-    schema_info = get_database_schema()
+    schema_info = get_database_schema(workspace_id)
     print("Schemas scanned. Agent is ready!")
     print("-"*60)
     
@@ -294,7 +294,7 @@ def start_chat_loop():
                 break
                 
             print("Thinking...")
-            response = process_agent_query(user_input, schema_info)
+            response = process_agent_query(user_input, schema_info, workspace_id)
             print(response)
             print("-"*60)
             

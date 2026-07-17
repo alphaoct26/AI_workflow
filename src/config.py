@@ -25,6 +25,39 @@ GOLD_CSV_PATH = DATA_DIR / "gold_monthly_metrics.csv"
 CHART_PATH = DATA_DIR / "monthly_revenue.png"
 PPTX_PATH = DATA_DIR / "ecommerce_report.pptx"
 
+def get_workspace_dir(workspace_id: str) -> Path:
+    """Returns the dedicated directory path for a workspace_id, creating it if necessary."""
+    w_dir = DATA_DIR / "workspaces" / workspace_id
+    w_dir.mkdir(parents=True, exist_ok=True)
+    return w_dir
+
+def get_workspace_db_path(workspace_id: str) -> Path:
+    """Returns the database file path for a workspace_id."""
+    if workspace_id == "default":
+        return DB_PATH
+    return get_workspace_dir(workspace_id) / "analytics.duckdb"
+
+def get_workspace_file_paths(workspace_id: str) -> dict:
+    """Returns a dictionary of isolated output file paths for a workspace_id."""
+    w_dir = get_workspace_dir(workspace_id)
+    if workspace_id == "default":
+        return {
+            "raw_csv": RAW_CSV_PATH,
+            "clean_csv": CLEAN_CSV_PATH,
+            "gold_csv": GOLD_CSV_PATH,
+            "chart_png": CHART_PATH,
+            "pptx_report": PPTX_PATH,
+            "profile_json": DATA_DIR / "schema_profile.json"
+        }
+    return {
+        "raw_csv": w_dir / "raw_sales.csv",
+        "clean_csv": w_dir / "raw_sales_clean.csv",
+        "gold_csv": w_dir / "gold_monthly_metrics.csv",
+        "chart_png": w_dir / "monthly_revenue.png",
+        "pptx_report": w_dir / "ecommerce_report.pptx",
+        "profile_json": w_dir / "schema_profile.json"
+    }
+
 # Make sure folders exist
 for folder in [LANDING_ZONE_DIR, DATA_DIR, POWERBI_DIR]:
     folder.mkdir(parents=True, exist_ok=True)

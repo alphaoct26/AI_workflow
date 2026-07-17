@@ -23,15 +23,24 @@ def main():
     print("      Starting E-Commerce Auto-Analyst ETL Pipeline")
     print("="*60)
     
-    # 1. Initialize Pipeline
-    profile_path = DB_PATH.parent / "schema_profile.json"
+    # 1. Initialize Workspace ID
+    import sys
+    workspace_id = "default"
+    if len(sys.argv) > 1:
+        arg = sys.argv[1].strip()
+        if arg and not arg.startswith("-"):
+            workspace_id = arg
+            
+    from src.config import get_workspace_file_paths
+    paths = get_workspace_file_paths(workspace_id)
+    profile_path = paths["profile_json"]
     if profile_path.exists():
         try:
             profile_path.unlink()
         except Exception:
             pass
             
-    pipeline = ETLPipeline()
+    pipeline = ETLPipeline(workspace_id)
     
     # 2. Database schemas setup
     pipeline.create_schema()
@@ -60,7 +69,7 @@ def main():
     print("-"*60)
     
     # 9. Generate Matplotlib Revenue Chart
-    generate_matplotlib_chart()
+    generate_matplotlib_chart(workspace_id)
     
     # 10. Generate Power BI Project Folder
     generate_powerbi_project()
@@ -81,15 +90,15 @@ def main():
     # 12. Run Gemini AI Business Analysis
     print("Invoking Gemini for Business Analysis and Recommendations...")
     try:
-        insights = run_ai_analysis()
+        insights = run_ai_analysis(workspace_id)
         
         # 13. Create PowerPoint presentation from AI insights
-        create_presentation_deck(insights)
+        create_presentation_deck(insights, workspace_id)
         
         print("\n" + "="*60)
         print("      Pipeline execution complete!")
-        print(f"      - Database: {DB_PATH}")
-        print(f"      - PowerPoint Report: {PPTX_PATH}")
+        print(f"      - Database: {pipeline.db.db_path}")
+        print(f"      - PowerPoint Report: {paths['pptx_report']}")
         print(f"      - Power BI Project: {POWERBI_DIR}/AutoAnalyst.pbip")
         print("="*60)
         

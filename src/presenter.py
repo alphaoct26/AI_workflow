@@ -16,12 +16,12 @@ from src.analyst import BusinessInsights
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("Presenter")
 
-def generate_matplotlib_chart():
+def generate_matplotlib_chart(workspace_id: str = "default"):
     """Queries the Gold summary and creates a clean, premium bar chart of Monthly Revenue."""
     logger.info("Presenter: Creating Matplotlib visual chart...")
     
     from src.db_adapter import DatabaseAdapter
-    db = DatabaseAdapter()
+    db = DatabaseAdapter(workspace_id)
     conn = db.get_connection()
     df = pd.read_sql_query("SELECT * FROM gold_monthly_metrics", conn)
     conn.close()
@@ -104,10 +104,12 @@ def generate_matplotlib_chart():
     ax.set_axisbelow(True) # Keep grid behind bars
     
     plt.tight_layout()
-    plt.savefig(CHART_PATH, facecolor=fig.get_facecolor(), edgecolor='none')
+    from src.config import get_workspace_file_paths
+    paths = get_workspace_file_paths(workspace_id)
+    plt.savefig(paths["chart_png"], facecolor=fig.get_facecolor(), edgecolor='none')
     plt.close()
     
-    logger.info(f"Presenter: Chart generated and saved to {CHART_PATH}.")
+    logger.info(f"Presenter: Chart generated and saved to {paths['chart_png']}.")
 
 def apply_text_formatting(paragraph, text, size_pt, color_rgb, font_name, bold=False, italic=False, alignment=PP_ALIGN.LEFT):
     """Utility to safely format paragraphs in python-pptx."""
@@ -130,7 +132,7 @@ def add_slide_card(slide, left, top, width, height):
     card.line.width = Pt(1)
     return card
 
-def create_presentation_deck(insights: BusinessInsights):
+def create_presentation_deck(insights: BusinessInsights, workspace_id: str = "default"):
     """Builds the final 3-slide e-commerce presentation deck using parsed JSON insights."""
     logger.info("Presenter: Compiling PowerPoint deck...")
     
@@ -160,33 +162,28 @@ def create_presentation_deck(insights: BusinessInsights):
         MSO_SHAPE.RECTANGLE, Inches(1.5), Inches(2.2), Inches(0.15), Inches(3.2)
     )
     accent_bar.fill.solid()
-    accent_bar.fill.fore_color.rgb = RGBColor(*THEME_COLORS['primary'])
+    accent_bar.fill.fore_color.rgb = RGBColor(*THEME_COLORS['secondary'])
     accent_bar.line.fill.background()
     
-    # Title & Subtitle text box
-    title_box = slide_1.shapes.add_textbox(Inches(1.8), Inches(2.1), Inches(10.0), Inches(3.5))
+    # Title Text Frame (Single text frame to prevent overlapping title/subtitle)
+    title_box = slide_1.shapes.add_textbox(Inches(1.8), Inches(2.0), Inches(10), Inches(3.5))
     tf_1 = title_box.text_frame
     tf_1.word_wrap = True
     
     # Title Paragraph
     p_title = tf_1.paragraphs[0]
-    apply_text_formatting(
-        p_title, "E-COMMERCE PERFORMANCE REPORT", 38, THEME_COLORS['card_bg'], FONT_TITLE, bold=True
-    )
-    p_title.space_after = Pt(14)
+    apply_text_formatting(p_title, "AUTO-ANALYST REPORT", 40, THEME_COLORS['light_bg'], FONT_TITLE, bold=True)
+    p_title.space_after = Pt(8)
     
     # Subtitle Paragraph
     p_sub = tf_1.add_paragraph()
-    apply_text_formatting(
-        p_sub, "6-Month Sales Auditing & AI-Generated Business Insights", 18, THEME_COLORS['secondary'], FONT_BODY, italic=True
-    )
+    apply_text_formatting(p_sub, f"Dynamic Business Performance & Insights  |  Workspace: {workspace_id}", 16, THEME_COLORS['text_muted'], FONT_BODY, italic=True)
+    p_sub.space_after = Pt(28)
     
-    # Metadata Footer
+    # Metadata Paragraph
     p_meta = tf_1.add_paragraph()
-    p_meta.space_before = Pt(60)
-    apply_text_formatting(
-        p_meta, f"Generated: {pd.Timestamp.now().strftime('%Y-%m-%d')} | Data Warehouse ETL & SQL Pipeline", 11, THEME_COLORS['text_muted'], FONT_BODY
-    )
+    run_date = datetime.now().strftime("%B %d, %Y")
+    apply_text_formatting(p_meta, f"Generated automatically on {run_date}\nPowered by Gemini & DuckDB OLAP Engine", 11, THEME_COLORS['text_muted'], FONT_BODY)
     
     # ==========================================
     # SLIDE 2: Executive Summary & Key Findings (Light Theme)
@@ -197,24 +194,24 @@ def create_presentation_deck(insights: BusinessInsights):
     fill_2.solid()
     fill_2.fore_color.rgb = RGBColor(*THEME_COLORS['light_bg'])
     
-    # Title
+    # Header
     header_2 = slide_2.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(11.73), Inches(0.8))
     apply_text_formatting(
-        header_2.text_frame.paragraphs[0], "Executive Summary & Core Findings", 26, THEME_COLORS['text_dark'], FONT_TITLE, bold=True
+        header_2.text_frame.paragraphs[0], "Executive Summary & Performance Audits", 26, THEME_COLORS['text_dark'], FONT_TITLE, bold=True
     )
     
     # Column 1: Executive Summary Card (Left)
     col_width = Inches(5.6)
-    col_gap = Inches(0.53)
-    card_height = Inches(5.0)
+    card_height = Inches(5.1)
+    left_col_1 = Inches(0.8)
+    add_slide_card(slide_2, left_col_1, Inches(1.5), col_width, card_height)
     
-    add_slide_card(slide_2, Inches(0.8), Inches(1.5), col_width, card_height)
-    summary_box = slide_2.shapes.add_textbox(Inches(1.0), Inches(1.7), col_width - Inches(0.4), card_height - Inches(0.4))
+    summary_box = slide_2.shapes.add_textbox(left_col_1 + Inches(0.2), Inches(1.7), col_width - Inches(0.4), card_height - Inches(0.4))
     tf_summary = summary_box.text_frame
     tf_summary.word_wrap = True
     
     p_sum_head = tf_summary.paragraphs[0]
-    apply_text_formatting(p_sum_head, "EXECUTIVE SUMMARY", 14, THEME_COLORS['primary'], FONT_TITLE, bold=True)
+    apply_text_formatting(p_sum_head, "BUSINESS EXECUTIVE OVERVIEW", 14, THEME_COLORS['primary'], FONT_TITLE, bold=True)
     p_sum_head.space_after = Pt(14)
     
     p_sum_body = tf_summary.add_paragraph()
@@ -222,27 +219,28 @@ def create_presentation_deck(insights: BusinessInsights):
     p_sum_body.line_spacing = 1.2
     
     # Column 2: Key Findings Card (Right)
-    left_col_2 = Inches(0.8) + col_width + col_gap
+    left_col_2 = Inches(6.9)
     add_slide_card(slide_2, left_col_2, Inches(1.5), col_width, card_height)
+    
     findings_box = slide_2.shapes.add_textbox(left_col_2 + Inches(0.2), Inches(1.7), col_width - Inches(0.4), card_height - Inches(0.4))
     tf_findings = findings_box.text_frame
     tf_findings.word_wrap = True
     
     p_find_head = tf_findings.paragraphs[0]
-    apply_text_formatting(p_find_head, "KEY FINDINGS & OBSERVATIONS", 14, THEME_COLORS['primary'], FONT_TITLE, bold=True)
+    apply_text_formatting(p_find_head, "CORE BUSINESS FINDINGS & ANOMALIES", 14, THEME_COLORS['primary'], FONT_TITLE, bold=True)
     p_find_head.space_after = Pt(14)
     
     for finding in insights.key_findings:
         p_item = tf_findings.add_paragraph()
-        p_item.space_after = Pt(10)
+        p_item.space_after = Pt(12)
         p_item.level = 0
         p_item.line_spacing = 1.15
         
         # Format bullet point
-        apply_text_formatting(p_item, f"•  {finding}", 12, THEME_COLORS['text_dark'], FONT_BODY)
+        apply_text_formatting(p_item, f"▪  {finding}", 12, THEME_COLORS['text_dark'], FONT_BODY)
         
     # ==========================================
-    # SLIDE 3: Visuals & Recommendations (Light Theme)
+    # SLIDE 3: Charts & Recommendations (Light Theme)
     # ==========================================
     slide_3 = prs.slides.add_slide(blank_layout)
     bg_3 = slide_3.background
@@ -260,8 +258,10 @@ def create_presentation_deck(insights: BusinessInsights):
     add_slide_card(slide_3, Inches(0.8), Inches(1.5), col_width, card_height)
     
     # Insert visual image inside the card
+    from src.config import get_workspace_file_paths
+    paths = get_workspace_file_paths(workspace_id)
     slide_3.shapes.add_picture(
-        str(CHART_PATH), 
+        str(paths["chart_png"]), 
         Inches(1.0), 
         Inches(1.75), 
         width=col_width - Inches(0.4), 
@@ -288,5 +288,5 @@ def create_presentation_deck(insights: BusinessInsights):
         apply_text_formatting(p_action, f"✔  {action}", 12, THEME_COLORS['text_dark'], FONT_BODY)
         
     # Save PPTX
-    prs.save(str(PPTX_PATH))
-    logger.info(f"Presenter: Presentation saved successfully to {PPTX_PATH}.")
+    prs.save(str(paths["pptx_report"]))
+    logger.info(f"Presenter: Presentation saved successfully to {paths['pptx_report']}.")
