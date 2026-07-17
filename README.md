@@ -1,3 +1,21 @@
+<div align="center">
+
+# 🤖 Auto-Analyst — AI-Powered Data Engineering SaaS
+
+[![Live Demo](https://img.shields.io/badge/🚀%20Live%20Demo-ai--workflow--theta--two.vercel.app-6366f1?style=for-the-badge&logo=vercel&logoColor=white)](https://ai-workflow-theta-two.vercel.app/)
+[![Tests](https://img.shields.io/badge/Tests-22%20Passed-0d9488?style=for-the-badge&logo=pytest&logoColor=white)](#-automated-unit-testing-pytest)
+[![Python](https://img.shields.io/badge/Python-3.10+-3b82f6?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![DuckDB](https://img.shields.io/badge/Database-DuckDB-f59e0b?style=for-the-badge&logo=duckdb&logoColor=white)](https://duckdb.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-gray?style=for-the-badge)](LICENSE)
+
+**[👉 Open Live Dashboard →](https://ai-workflow-theta-two.vercel.app/)**
+
+*A production-grade, multi-tenant Medallion ETL pipeline with a multi-LLM gateway and an interactive browser-based SQL AI Agent — deployable in one click.*
+
+</div>
+
+---
+
 # E-Commerce Auto-Analyst ETL Pipeline & Interactive SQL Agent
 
 This repository contains a modular, production-grade Data Engineering and Business Intelligence pipeline. It implements a complete **Medallion Architecture (Bronze -> Silver -> Gold)** using Python and SQLite, integrates **Gemini AI** for structured insights extraction, automatically compiles a styled **PowerPoint Presentation**, generates a local **Power BI Project (`.pbip`)** connected to the clean metrics, and drops the user into an **Interactive SQL Agent CLI Chat** to query the database using natural language.
@@ -130,6 +148,11 @@ We have built a premium, dark glassmorphic web dashboard that allows recruiters,
    python app.py
    ```
 3. Open your browser and navigate to: **[http://127.0.0.1:5000](http://127.0.0.1:5000)**
+
+### 🌍 Live Public URL (No Setup Required):
+The dashboard is already deployed and publicly accessible at:
+
+> **[https://ai-workflow-theta-two.vercel.app/](https://ai-workflow-theta-two.vercel.app/)**
 
 ### Host & Deploy Publicly (for Recruiters):
 To launch the dashboard live so anyone (or a recruiter) can look at it instantly without running command lines:
