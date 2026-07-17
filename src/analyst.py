@@ -30,16 +30,39 @@ def extract_gold_data_as_text() -> str:
     db = DatabaseAdapter()
     
     conn = db.get_connection()
-    df = pd.read_sql_query("SELECT * FROM gold_monthly_metrics ORDER BY month ASC", conn)
+    df = pd.read_sql_query("SELECT * FROM gold_monthly_metrics", conn)
     conn.close()
     
-    # Format numbers for better readability
-    df_formatted = df.copy()
-    df_formatted["revenue"] = df_formatted["revenue"].apply(lambda x: f"${x:,.2f}")
-    df_formatted["cost"] = df_formatted["cost"].apply(lambda x: f"${x:,.2f}")
-    df_formatted["profit_margin"] = df_formatted["profit_margin"].apply(lambda x: f"{x * 100:.2f}%")
-    df_formatted["units_sold"] = df_formatted["units_sold"].apply(lambda x: f"{x:,}")
+    if df.empty:
+        return "No data available in gold aggregates."
+        
+    # Sort by the first column (typically the date/grouping column)
+    df = df.sort_values(by=df.columns[0], ascending=True)
     
+    # Format numbers dynamically based on column name hints
+    df_formatted = df.copy()
+    for col in df_formatted.columns:
+        col_lower = col.lower()
+        if any(kw in col_lower for kw in ("revenue", "cost", "salary", "amount", "price", "copay", "fee")):
+            try:
+                df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) and str(x).strip() != '' else "")
+            except Exception:
+                pass
+        elif any(kw in col_lower for kw in ("margin", "rate", "pct", "percent")):
+            try:
+                non_nulls = df_formatted[col].dropna()
+                first_val = float(non_nulls.iloc[0]) if not non_nulls.empty else None
+                # If values are decimals (e.g. 0.402), multiply by 100
+                multiplier = 100 if first_val is not None and abs(first_val) <= 1.0 else 1
+                df_formatted[col] = df_formatted[col].apply(lambda x: f"{float(x) * multiplier:.2f}%" if pd.notnull(x) and str(x).strip() != '' else "")
+            except Exception:
+                pass
+        elif any(kw in col_lower for kw in ("units", "sold", "count", "qty", "quantity", "id")):
+            try:
+                df_formatted[col] = df_formatted[col].apply(lambda x: f"{int(float(x)):,}" if pd.notnull(x) and str(x).strip() != '' else "")
+            except Exception:
+                pass
+                
     return df_formatted.to_markdown(index=False)
 
 def run_ai_analysis() -> BusinessInsights:

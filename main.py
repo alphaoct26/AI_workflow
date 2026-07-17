@@ -24,6 +24,13 @@ def main():
     print("="*60)
     
     # 1. Initialize Pipeline
+    profile_path = DB_PATH.parent / "schema_profile.json"
+    if profile_path.exists():
+        try:
+            profile_path.unlink()
+        except Exception:
+            pass
+            
     pipeline = ETLPipeline()
     
     # 2. Database schemas setup

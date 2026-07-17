@@ -3,9 +3,11 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import logging
+from pathlib import Path
 from src.config import (
     DB_PATH, LANDING_ZONE_DIR, RAW_CSV_PATH, CLEAN_CSV_PATH, GOLD_CSV_PATH, THEME_HEX
 )
+from src.schema_profiler import SchemaProfiler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -16,6 +18,7 @@ class ETLPipeline:
         from src.db_adapter import DatabaseAdapter
         self.db = DatabaseAdapter()
         self.db_path = str(DB_PATH)
+        self.schema_profiler = SchemaProfiler()
 
     def generate_mock_csvs(self):
         """
@@ -106,8 +109,12 @@ class ETLPipeline:
         logger.info(f"Mock data created. Batch 1: {len(df_batch_1)} rows, Batch 2: {len(df_batch_2)} rows.")
         return [batch_1_file, batch_2_file]
 
-    def create_schema(self):
-        """Creates tables for Bronze, Silver, Gold, and Quarantine layers using the DB Adapter."""
+    def create_schema(self, file_path=None):
+        """Creates tables for Bronze, Silver, Gold, and Quarantine layers dynamically or statically."""
+        if file_path:
+            profile = self.schema_profiler.profile_file(Path(file_path))
+            self.db.load_profile(profile)
+            
         logger.info("Initializing database schemas...")
         conn = self.db.get_connection()
         cursor = conn.cursor()
@@ -125,6 +132,11 @@ class ETLPipeline:
         filename = file_path.name
         logger.info(f"Bronze Ingestion: Loading raw file '{filename}'...")
         
+        # Profile and initialize dynamic schema on first ingest if not already present
+        if not self.db.profile:
+            logger.info("No schema profile loaded. Performing dynamic profiling on ingestion...")
+            self.create_schema(file_path)
+            
         df = pd.read_csv(file_path)
         df["ingested_at"] = datetime.now().isoformat()
         df["source_file"] = filename
@@ -136,7 +148,7 @@ class ETLPipeline:
         placeholder = "%s" if self.db.dialect == "postgres" else "?"
         columns = list(df_str.columns)
         placeholders_str = ", ".join([placeholder] * len(columns))
-        columns_str = ", ".join(columns)
+        columns_str = ", ".join([f'"{col}"' for col in columns])
         
         insert_query = f"INSERT INTO bronze_raw_sales ({columns_str}) VALUES ({placeholders_str})"
         records = [tuple(row) for row in df_str.values]
@@ -177,31 +189,73 @@ class ETLPipeline:
         quarantine_count = cursor.fetchone()[0]
         conn.close()
         
-        logger.info(f"Silver Transformation: Completed. Cleaned sales: {silver_count} rows. Quarantined: {quarantine_count} rows.")
+        logger.info(f"Silver Transformation: Completed. Cleaned records: {silver_count} rows. Quarantined: {quarantine_count} rows.")
 
     def run_gold_aggregation(self):
         """
         Transforms Silver -> Gold.
-        Aggregates metrics to monthly level and calculates profit margins and top categories using dialect-specific SQL.
+        Aggregates metrics dynamically using candidate aggregation queries suggested by the LLM.
         """
         logger.info("Gold Aggregation: Synthesizing monthly business aggregates...")
         conn = self.db.get_connection()
         cursor = conn.cursor()
         
-        # Clear existing Gold table
-        cursor.execute("DELETE FROM gold_monthly_metrics")
+        # Clear existing Gold metrics
+        cursor.execute("DROP TABLE IF EXISTS gold_monthly_metrics")
         
-        # Execute gold aggregation SQL
-        gold_sql = self.db.get_gold_aggregation_query()
-        cursor.execute(gold_sql)
-        conn.commit()
-        
-        # Log aggregated months
-        cursor.execute("SELECT month, revenue, cost, profit_margin, units_sold, top_category FROM gold_monthly_metrics ORDER BY month ASC")
-        rows = cursor.fetchall()
-        for row in rows:
-            logger.info(f"Gold Aggregation: Month: {row[0]} | Revenue: ${row[1]:,.2f} | Margin: {row[3]*100:.1f}% | Top Category: {row[5]}")
+        if self.db.profile:
+            dialect = self.db.dialect
+            options = self.schema_profiler.generate_gold_aggregation_options(self.db.profile, dialect)
             
+            logger.info("LLM Candidate Gold Aggregations Proposed:")
+            for idx, opt in enumerate(options):
+                logger.info(f"Option {idx+1}: {opt['description']}\nSQL:\n{opt['sql']}")
+                
+            # Pick the primary (first) candidate query option
+            primary_sql = options[0]["sql"]
+            logger.info(f"Executing primary dynamic Gold aggregation: {options[0]['description']}")
+            
+            # Execute CREATE TABLE AS dynamically
+            cursor.execute(f"CREATE TABLE gold_monthly_metrics AS {primary_sql}")
+            conn.commit()
+            
+            # Log dynamic columns
+            if dialect == "postgres":
+                cursor.execute("""
+                    SELECT column_name, data_type 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'gold_monthly_metrics';
+                """)
+                cols = [row[0] for row in cursor.fetchall()]
+            else:
+                cursor.execute("PRAGMA table_info(gold_monthly_metrics)")
+                cols = [row[1] for row in cursor.fetchall()]
+            logger.info(f"Gold Aggregation: Dynamic Table columns: {', '.join(cols)}")
+        else:
+            # Recreate static table if no profile
+            id_type = "SERIAL PRIMARY KEY" if self.db.dialect == "postgres" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS gold_monthly_metrics (
+                    month TEXT,
+                    revenue REAL,
+                    cost REAL,
+                    profit_margin REAL,
+                    units_sold INTEGER,
+                    top_category TEXT
+                );
+            """)
+            conn.commit()
+            
+            gold_sql = self.db.get_gold_aggregation_query()
+            cursor.execute(f"INSERT INTO gold_monthly_metrics {gold_sql}" if "INSERT INTO" not in gold_sql else gold_sql)
+            conn.commit()
+            
+            # Log static summaries
+            cursor.execute("SELECT month, revenue, cost, profit_margin, units_sold FROM gold_monthly_metrics ORDER BY month ASC")
+            rows = cursor.fetchall()
+            for row in rows:
+                logger.info(f"Gold Aggregation: Month: {row[0]} | Revenue: ${row[1]:,.2f} | Margin: {row[3]*100:.1f}%")
+                
         conn.close()
         logger.info("Gold Aggregation: Completed.")
 
@@ -241,19 +295,44 @@ class ETLPipeline:
         audit_results["silver_row_count"] = silver_rows
         
         # Check 2: Null values check in Silver (should be 0)
-        cursor.execute("""
-            SELECT COUNT(*) FROM silver_clean_sales 
-            WHERE date IS NULL OR category IS NULL OR revenue IS NULL OR cost IS NULL OR units_sold IS NULL
-        """)
+        if self.db.profile:
+            cols = list(self.db.profile.keys())
+            null_conditions = " OR ".join([f'"{col}" IS NULL' for col in cols])
+            cursor.execute(f"SELECT COUNT(*) FROM silver_clean_sales WHERE {null_conditions}")
+        else:
+            cursor.execute("""
+                SELECT COUNT(*) FROM silver_clean_sales 
+                WHERE date IS NULL OR category IS NULL OR revenue IS NULL OR cost IS NULL OR units_sold IS NULL
+            """)
         nulls_in_silver = cursor.fetchone()[0]
         audit_results["null_violations_in_silver"] = nulls_in_silver
         
-        # Check 3: Reconciliation check (Total Revenue of Silver vs Gold monthly totals)
-        cursor.execute("SELECT SUM(revenue) FROM silver_clean_sales")
-        silver_revenue = round(cursor.fetchone()[0] or 0.0, 2)
-        cursor.execute("SELECT SUM(revenue) FROM gold_monthly_metrics")
-        gold_revenue = round(cursor.fetchone()[0] or 0.0, 2)
+        # Check 3: Reconciliation check (Total Revenue/Measures of Silver vs Gold monthly totals)
+        silver_revenue = 0.0
+        gold_revenue = 0.0
         
+        if self.db.profile:
+            measures = [col for col, details in self.db.profile.items() if details["role"] == "measure"]
+            # Check what columns exist in the generated gold table
+            if self.db.dialect == "postgres":
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'gold_monthly_metrics'")
+            else:
+                cursor.execute("PRAGMA table_info(gold_monthly_metrics)")
+            gold_cols = [r[0] for r in cursor.fetchall()]
+            
+            shared_measures = [m for m in measures if m in gold_cols]
+            if shared_measures:
+                m = shared_measures[0]
+                cursor.execute(f'SELECT SUM("{m}") FROM silver_clean_sales')
+                silver_revenue = round(cursor.fetchone()[0] or 0.0, 2)
+                cursor.execute(f'SELECT SUM("{m}") FROM gold_monthly_metrics')
+                gold_revenue = round(cursor.fetchone()[0] or 0.0, 2)
+        else:
+            cursor.execute("SELECT SUM(revenue) FROM silver_clean_sales")
+            silver_revenue = round(cursor.fetchone()[0] or 0.0, 2)
+            cursor.execute("SELECT SUM(revenue) FROM gold_monthly_metrics")
+            gold_revenue = round(cursor.fetchone()[0] or 0.0, 2)
+            
         audit_results["silver_total_revenue"] = silver_revenue
         audit_results["gold_total_revenue"] = gold_revenue
         audit_results["financial_discrepancy"] = round(abs(silver_revenue - gold_revenue), 2)
@@ -275,8 +354,8 @@ class ETLPipeline:
         for reason, count in rejections_breakdown:
             logger.info(f"  - {reason}: {count} rows")
         logger.info(f"Null Violations in Silver: {nulls_in_silver} {'[PASSED]' if nulls_in_silver == 0 else '[FAILED]'}")
-        logger.info(f"Silver Total Revenue: ${silver_revenue:,.2f}")
-        logger.info(f"Gold Total Revenue: ${gold_revenue:,.2f}")
+        logger.info(f"Silver Reconciliation Sum: ${silver_revenue:,.2f}")
+        logger.info(f"Gold Reconciliation Sum: ${gold_revenue:,.2f}")
         logger.info(f"Financial Reconciliation Discrepancy: ${audit_results['financial_discrepancy']:,.2f} "
                     f"{'[PASSED]' if audit_results['financial_discrepancy'] == 0 else '[WARNING]'}")
         logger.info("=====================================================")

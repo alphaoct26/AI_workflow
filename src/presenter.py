@@ -22,10 +22,26 @@ def generate_matplotlib_chart():
     
     from src.db_adapter import DatabaseAdapter
     db = DatabaseAdapter()
-    
     conn = db.get_connection()
-    df = pd.read_sql_query("SELECT month, revenue FROM gold_monthly_metrics ORDER BY month ASC", conn)
+    df = pd.read_sql_query("SELECT * FROM gold_monthly_metrics", conn)
     conn.close()
+    
+    if df.empty:
+        logger.warning("Presenter: Gold table is empty. Skipping chart generation.")
+        return
+        
+    # Dynamically resolve X (grouping) and Y (numeric) columns
+    x_col = df.columns[0]
+    y_col = None
+    for col in df.columns[1:]:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            y_col = col
+            break
+    if not y_col:
+        y_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+        
+    # Sort by X column
+    df = df.sort_values(by=x_col, ascending=True)
     
     # Enable modern style
     plt.rcParams['font.family'] = FONT_TITLE
@@ -33,10 +49,18 @@ def generate_matplotlib_chart():
     fig.patch.set_facecolor(THEME_HEX['light_bg'])
     ax.set_facecolor(THEME_HEX['light_bg'])
     
+    max_val = df[y_col].max()
+    should_scale = max_val > 1000
+    y_vals = df[y_col] / 1000.0 if should_scale else df[y_col]
+    
+    is_currency = any(kw in y_col.lower() for kw in ("revenue", "cost", "salary", "amount", "price", "copay", "fee"))
+    unit_suffix = "k" if should_scale else ""
+    prefix = "$" if is_currency else ""
+    
     # Draw bars with Indigo primary color and clean border rounded aesthetic
     bars = ax.bar(
-        df['month'], 
-        df['revenue'] / 1000.0, # Scale to thousands
+        df[x_col].astype(str), 
+        y_vals, 
         color=THEME_HEX['primary'], 
         width=0.55, 
         edgecolor=THEME_HEX['primary'],
@@ -46,10 +70,11 @@ def generate_matplotlib_chart():
     # Add values on top of the bars
     for bar in bars:
         yval = bar.get_height()
+        label_text = f"{prefix}{yval:,.1f}{unit_suffix}" if should_scale else f"{prefix}{yval:,.0f}"
         ax.text(
             bar.get_x() + bar.get_width()/2.0, 
-            yval + 2, 
-            f"${yval:.1f}k", 
+            yval, 
+            label_text, 
             ha='center', 
             va='bottom', 
             fontsize=9, 
@@ -58,9 +83,14 @@ def generate_matplotlib_chart():
         )
         
     # Styling labels and titles
-    ax.set_title("MONTHLY REVENUE OVERVIEW", fontsize=12, fontweight='bold', pad=20, color=THEME_HEX['text_dark'])
-    ax.set_ylabel("Revenue (in thousands USD)", fontsize=10, fontweight='bold', color=THEME_HEX['text_muted'])
-    ax.set_xlabel("Month (2026)", fontsize=10, fontweight='bold', color=THEME_HEX['text_muted'])
+    title_text = f"MONTHLY {y_col.upper()} OVERVIEW"
+    y_label_text = f"{y_col} (in thousands)" if should_scale else y_col
+    if is_currency:
+        y_label_text += " USD" if should_scale else " ($)"
+        
+    ax.set_title(title_text, fontsize=12, fontweight='bold', pad=20, color=THEME_HEX['text_dark'])
+    ax.set_ylabel(y_label_text, fontsize=10, fontweight='bold', color=THEME_HEX['text_muted'])
+    ax.set_xlabel(x_col, fontsize=10, fontweight='bold', color=THEME_HEX['text_muted'])
     
     # Adjust ticks
     ax.tick_params(colors=THEME_HEX['text_muted'], labelsize=9)
