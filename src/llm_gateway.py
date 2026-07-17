@@ -173,26 +173,33 @@ def generate_llm_response(prompt: str, system_instruction: str = None, response_
             if provider == "gemini":
                 return call_gemini(model, key, prompt, system_instruction, response_schema)
                 
-            elif provider == "claude":
-                # For non-gemini models, if a schema is requested, we instruct the model in the prompt
-                modified_prompt = prompt
-                if response_schema:
-                    modified_prompt += "\n\nIMPORTANT: Return ONLY a raw JSON object matching the requested schema. No markdown code blocks."
-                return clean_json_response(call_claude(model, key, modified_prompt, system_instruction))
-                
-            elif provider == "nvidia":
-                url = "https://integrate.api.nvidia.com/v1/chat/completions"
-                modified_prompt = prompt
-                if response_schema:
-                    modified_prompt += "\n\nIMPORTANT: Return ONLY a raw JSON object matching the requested schema. No markdown code blocks."
-                return clean_json_response(call_openai_compatible(url, model, key, modified_prompt, system_instruction, json_mode=False))
-                
-            elif provider == "openai":
-                url = "https://api.openai.com/v1/chat/completions"
-                return clean_json_response(call_openai_compatible(url, model, key, prompt, system_instruction, json_mode=(response_schema is not None)))
-                
             else:
-                raise ValueError(f"Unknown provider '{provider}'")
+                # Inject schema instructions for non-Gemini endpoints
+                modified_prompt = prompt
+                if response_schema:
+                    try:
+                        schema_dict = response_schema.model_json_schema()
+                    except AttributeError:
+                        try:
+                            schema_dict = response_schema.schema()
+                        except Exception:
+                            schema_dict = str(response_schema)
+                    schema_str = json.dumps(schema_dict, indent=2)
+                    modified_prompt += f"\n\nYou MUST return a raw JSON object conforming to this JSON Schema:\n```json\n{schema_str}\n```\nReturn ONLY the raw JSON text. No markdown formatting, explanation, prefix, or suffix."
+                
+                if provider == "claude":
+                    return clean_json_response(call_claude(model, key, modified_prompt, system_instruction))
+                    
+                elif provider == "nvidia":
+                    url = "https://integrate.api.nvidia.com/v1/chat/completions"
+                    return clean_json_response(call_openai_compatible(url, model, key, modified_prompt, system_instruction, json_mode=False))
+                    
+                elif provider == "openai":
+                    url = "https://api.openai.com/v1/chat/completions"
+                    return clean_json_response(call_openai_compatible(url, model, key, modified_prompt, system_instruction, json_mode=True))
+                
+                else:
+                    raise ValueError(f"Unknown provider '{provider}'")
                 
         except Exception as e:
             last_err = e

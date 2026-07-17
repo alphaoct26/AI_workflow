@@ -1,6 +1,6 @@
 import os
 import json
-import sqlite3
+import duckdb
 import pytest
 import pandas as pd
 from pathlib import Path
@@ -79,7 +79,7 @@ MOCK_GOLD_ECOMMERCE = {
     "options": [
         {
             "description": "Monthly revenue and units by product category",
-            "sql": "SELECT strftime('%Y-%m', date) as month, category, SUM(revenue) as revenue, SUM(units_sold) as units_sold FROM silver_clean_sales GROUP BY month, category"
+            "sql": "SELECT strftime(date, '%Y-%m') as month, category, SUM(revenue) as revenue, SUM(units_sold) as units_sold FROM silver_clean_sales GROUP BY month, category"
         }
     ]
 }
@@ -88,7 +88,7 @@ MOCK_GOLD_HR = {
     "options": [
         {
             "description": "Monthly average salary by department",
-            "sql": "SELECT strftime('%Y-%m', hire_date) as month, department, AVG(salary) as salary, COUNT(employee_id) as employee_count FROM silver_clean_sales GROUP BY month, department"
+            "sql": "SELECT strftime(hire_date, '%Y-%m') as month, department, AVG(salary) as salary, COUNT(employee_id) as employee_count FROM silver_clean_sales GROUP BY month, department"
         }
     ]
 }
@@ -97,7 +97,7 @@ MOCK_GOLD_HEALTHCARE = {
     "options": [
         {
             "description": "Monthly healthcare claims sum by clinical code",
-            "sql": "SELECT strftime('%Y-%m', claim_date) as month, diagnosis_code, SUM(claim_amount) as claim_amount, AVG(copay) as copay FROM silver_clean_sales GROUP BY month, diagnosis_code"
+            "sql": "SELECT strftime(claim_date, '%Y-%m') as month, diagnosis_code, SUM(claim_amount) as claim_amount, AVG(copay) as copay FROM silver_clean_sales GROUP BY month, diagnosis_code"
         }
     ]
 }
@@ -117,11 +117,11 @@ def setup_test_files():
 @pytest.fixture
 def test_db_path(tmp_path):
     # Returns a temporary database path for isolation
-    return tmp_path / "generic_test.db"
+    return tmp_path / "generic_test.duckdb"
 
 @patch("src.schema_profiler.generate_llm_response")
 def test_v1_generic_pipeline(mock_llm, test_db_path, monkeypatch):
-    # Apply temporary SQLite path
+    # Apply temporary DuckDB path
     monkeypatch.setattr("src.db_adapter.DB_PATH", test_db_path)
     monkeypatch.setattr("src.etl_orchestrator.DB_PATH", test_db_path)
     
@@ -161,8 +161,8 @@ def test_v1_generic_pipeline(mock_llm, test_db_path, monkeypatch):
     assert dq["quarantine_row_count"] == 3
     
     # Check Gold aggregation structure
-    conn = sqlite3.connect(str(test_db_path))
-    df_gold = pd.read_sql_query("SELECT * FROM gold_monthly_metrics", conn)
+    conn = duckdb.connect(str(test_db_path))
+    df_gold = conn.execute("SELECT * FROM gold_monthly_metrics").df()
     conn.close()
     assert "month" in df_gold.columns
     assert "category" in df_gold.columns
@@ -199,8 +199,8 @@ def test_v1_generic_pipeline(mock_llm, test_db_path, monkeypatch):
     assert dq_hr["quarantine_row_count"] == 3
     
     # Check Gold aggregated schema
-    conn = sqlite3.connect(str(test_db_path))
-    df_gold_hr = pd.read_sql_query("SELECT * FROM gold_monthly_metrics", conn)
+    conn = duckdb.connect(str(test_db_path))
+    df_gold_hr = conn.execute("SELECT * FROM gold_monthly_metrics").df()
     conn.close()
     assert "month" in df_gold_hr.columns
     assert "department" in df_gold_hr.columns
@@ -237,8 +237,8 @@ def test_v1_generic_pipeline(mock_llm, test_db_path, monkeypatch):
     assert dq_hc["quarantine_row_count"] == 3
     
     # Check Gold aggregates
-    conn = sqlite3.connect(str(test_db_path))
-    df_gold_hc = pd.read_sql_query("SELECT * FROM gold_monthly_metrics", conn)
+    conn = duckdb.connect(str(test_db_path))
+    df_gold_hc = conn.execute("SELECT * FROM gold_monthly_metrics").df()
     conn.close()
     assert "month" in df_gold_hc.columns
     assert "diagnosis_code" in df_gold_hc.columns

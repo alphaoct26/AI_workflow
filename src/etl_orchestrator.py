@@ -1,4 +1,4 @@
-import sqlite3
+import duckdb
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -128,7 +128,8 @@ class ETLPipeline:
         logger.info("Database schemas initialized.")
 
     def run_bronze_ingest(self, file_path):
-        """Loads a raw CSV file into the Bronze layer as-is."""
+        """Loads a raw CSV file into the Bronze layer as-is using dynamic streaming."""
+        file_path = Path(file_path)
         filename = file_path.name
         logger.info(f"Bronze Ingestion: Loading raw file '{filename}'...")
         
@@ -137,27 +138,17 @@ class ETLPipeline:
             logger.info("No schema profile loaded. Performing dynamic profiling on ingestion...")
             self.create_schema(file_path)
             
-        df = pd.read_csv(file_path)
-        df["ingested_at"] = datetime.now().isoformat()
-        df["source_file"] = filename
+        self.db.ingest_csv(file_path, "bronze_raw_sales")
         
+        # Count loaded rows for logging
         conn = self.db.get_connection()
-        df_str = df.astype(str)
-        
-        # Determine parameter placeholder based on dialect (PostgreSQL: %s, SQLite: ?)
-        placeholder = "%s" if self.db.dialect == "postgres" else "?"
-        columns = list(df_str.columns)
-        placeholders_str = ", ".join([placeholder] * len(columns))
-        columns_str = ", ".join([f'"{col}"' for col in columns])
-        
-        insert_query = f"INSERT INTO bronze_raw_sales ({columns_str}) VALUES ({placeholders_str})"
-        records = [tuple(row) for row in df_str.values]
-        
         cursor = conn.cursor()
-        cursor.executemany(insert_query, records)
-        conn.commit()
+        placeholder = "%s" if self.db.dialect == "postgres" else "?"
+        cursor.execute(f"SELECT COUNT(*) FROM bronze_raw_sales WHERE source_file = {placeholder}", (filename,))
+        row_count = cursor.fetchone()[0]
         conn.close()
-        logger.info(f"Bronze Ingestion: Loaded {len(df)} rows from {filename}.")
+        
+        logger.info(f"Bronze Ingestion: Loaded {row_count} rows from {filename}.")
 
     def run_silver_transform(self):
         """

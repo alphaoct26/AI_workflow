@@ -1,8 +1,8 @@
 import os
-import sqlite3
 import logging
 import json
 from pathlib import Path
+from datetime import datetime
 from src.config import BASE_DIR, DB_PATH
 
 logger = logging.getLogger("DB_Adapter")
@@ -10,12 +10,12 @@ logger = logging.getLogger("DB_Adapter")
 class DatabaseAdapter:
     """
     Abstracts database connection and dialect-specific queries 
-    supporting both SQLite (local/fallback) and PostgreSQL (production).
+    supporting both DuckDB (local/OLAP) and PostgreSQL (production).
     """
     def __init__(self):
         # Read from environment
         self.database_url = os.environ.get("DATABASE_URL")
-        self.dialect = "sqlite"
+        self.dialect = "duckdb"
         self.db_path = DB_PATH
         self.gold_query = None
         
@@ -36,15 +36,15 @@ class DatabaseAdapter:
                 logger.warning(
                     f"\n{'!'*60}\n"
                     f" [WARNING] PostgreSQL connection failed: {e}\n"
-                    f" Falling back to local SQLite database.\n"
+                    f" Falling back to local DuckDB database.\n"
                     f"{'!'*60}\n"
                 )
-                self.dialect = "sqlite"
+                self.dialect = "duckdb"
                 self.db_path = DB_PATH
         else:
-            self.dialect = "sqlite"
+            self.dialect = "duckdb"
             self.db_path = DB_PATH
-            logger.info(f"Database Adapter: Operating with SQLite. Path: {self.db_path}")
+            logger.info(f"Database Adapter: Operating with DuckDB. Path: {self.db_path}")
 
         # Load cached schema profile if it exists
         self.profile = None
@@ -71,15 +71,75 @@ class DatabaseAdapter:
             import psycopg2
             return psycopg2.connect(self.database_url)
         else:
-            return sqlite3.connect(str(self.db_path))
+            import duckdb
+            # Ensure the parent data directory exists
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            return duckdb.connect(str(self.db_path))
+
+    def ingest_csv(self, file_path: Path, table_name: str):
+        """Performs dynamic high-performance native or chunked streaming CSV ingestion to avoid out-of-memory errors."""
+        filename = file_path.name
+        conn = self.get_connection()
+        
+        if self.dialect == "duckdb":
+            # Use DuckDB's native disk-streaming read_csv_auto command (extremely fast, zero python memory overhead)
+            cursor = conn.cursor()
+            columns_to_load = list(self.profile.keys()) if self.profile else []
+            if not columns_to_load:
+                # Fallback: read columns from CSV header
+                import pandas as pd
+                df_cols = pd.read_csv(file_path, nrows=0).columns
+                columns_to_load = list(df_cols)
+                
+            columns_str = ", ".join([f'"{c}"' for c in columns_to_load])
+            types_str = ", ".join([f"'{c}': 'VARCHAR'" for c in columns_to_load])
+            
+            # Format Windows paths safely for DuckDB SQL
+            path_str = str(file_path.absolute()).replace("\\", "/")
+            
+            query = f"""
+            INSERT INTO {table_name} ({columns_str}, ingested_at, source_file)
+            SELECT {columns_str}, CURRENT_TIMESTAMP as ingested_at, '{filename}' as source_file
+            FROM read_csv_auto('{path_str}', types={{{types_str}}})
+            """
+            cursor.execute(query)
+            conn.commit()
+            conn.close()
+            logger.info(f"Database Adapter: Native DuckDB CSV ingestion complete for {filename}.")
+        else:
+            # PostgreSQL or SQLite fallback: stream using pandas chunksize to prevent RAM spikes
+            import pandas as pd
+            chunksize = 50000
+            cursor = conn.cursor()
+            
+            placeholder = "%s" if self.dialect == "postgres" else "?"
+            
+            first_chunk = True
+            for chunk in pd.read_csv(file_path, chunksize=chunksize):
+                chunk["ingested_at"] = datetime.now().isoformat()
+                chunk["source_file"] = filename
+                df_str = chunk.astype(str)
+                
+                columns = list(df_str.columns)
+                if first_chunk:
+                    columns_str = ", ".join([f'"{col}"' for col in columns])
+                    placeholders_str = ", ".join([placeholder] * len(columns))
+                    insert_query = f"INSERT INTO {table_name} ({columns_str}) VALUES ({placeholders_str})"
+                    first_chunk = False
+                    
+                records = [tuple(row) for row in df_str.values]
+                cursor.executemany(insert_query, records)
+                conn.commit()
+                
+            conn.close()
+            logger.info(f"Database Adapter: Chunked streaming CSV Ingestion complete for {filename}.")
 
     def get_schema_queries(self) -> list[str]:
         """Returns dialect-specific DDL queries for initializing tables dynamically or statically."""
         if not self.profile:
             return self._get_static_schema_queries()
             
-        id_type = "SERIAL PRIMARY KEY" if self.dialect == "postgres" else "INTEGER PRIMARY KEY AUTOINCREMENT"
-        timestamp_type = "TIMESTAMP"
+        queries = []
         
         # 1. Bronze Table DDL (all raw fields as TEXT)
         bronze_cols = []
@@ -88,7 +148,7 @@ class DatabaseAdapter:
         bronze_cols_str = ",\n            ".join(bronze_cols)
         
         # 2. Silver Table DDL (cast based on semantic roles)
-        silver_cols = [f"id {id_type}"]
+        silver_cols = []
         for col_name, details in self.profile.items():
             role = details["role"]
             if role == "date":
@@ -98,31 +158,44 @@ class DatabaseAdapter:
             else:
                 col_type = "TEXT"
             silver_cols.append(f'"{col_name}" {col_type}')
-        silver_cols.append(f"cleaned_at {timestamp_type}")
+        silver_cols.append("cleaned_at TIMESTAMP")
         silver_cols_str = ",\n            ".join(silver_cols)
         
         # 3. Quarantine Table DDL (every field prefixed with raw_)
-        quarantine_cols = [f"id {id_type}"]
+        quarantine_cols = []
         for col_name in self.profile.keys():
             quarantine_cols.append(f'"raw_{col_name}" TEXT')
         quarantine_cols.extend([
             "source_file TEXT",
             "ingested_at TEXT",
             "rejection_reason TEXT",
-            f"quarantined_at {timestamp_type}"
+            "quarantined_at TIMESTAMP"
         ])
         quarantine_cols_str = ",\n            ".join(quarantine_cols)
         
-        # Separate drop and create queries to prevent SQLite ProgrammingError (one statement at a time)
-        queries = [
-            "DROP TABLE IF EXISTS bronze_raw_sales",
-            f"CREATE TABLE bronze_raw_sales (\n            {bronze_cols_str},\n            ingested_at {timestamp_type},\n            source_file TEXT\n        )",
-            "DROP TABLE IF EXISTS silver_clean_sales",
-            f"CREATE TABLE silver_clean_sales (\n            {silver_cols_str}\n        )",
-            "DROP TABLE IF EXISTS quarantine_rejected_sales",
-            f"CREATE TABLE quarantine_rejected_sales (\n            {quarantine_cols_str}\n        )"
-        ]
-        
+        # Dialect DDL customization with sequences for Postgres/DuckDB
+        if self.dialect in ("postgres", "duckdb"):
+            queries.extend([
+                "CREATE SEQUENCE IF NOT EXISTS silver_seq",
+                "CREATE SEQUENCE IF NOT EXISTS quarantine_seq",
+                "DROP TABLE IF EXISTS bronze_raw_sales CASCADE",
+                f"CREATE TABLE bronze_raw_sales (\n            {bronze_cols_str},\n            ingested_at TIMESTAMP,\n            source_file TEXT\n        )",
+                "DROP TABLE IF EXISTS silver_clean_sales CASCADE",
+                f"CREATE TABLE silver_clean_sales (\n            id INTEGER DEFAULT nextval('silver_seq') PRIMARY KEY,\n            {silver_cols_str}\n        )",
+                "DROP TABLE IF EXISTS quarantine_rejected_sales CASCADE",
+                f"CREATE TABLE quarantine_rejected_sales (\n            id INTEGER DEFAULT nextval('quarantine_seq') PRIMARY KEY,\n            {quarantine_cols_str}\n        )"
+            ])
+        else:
+            # SQLite fallback
+            queries.extend([
+                "DROP TABLE IF EXISTS bronze_raw_sales",
+                f"CREATE TABLE bronze_raw_sales (\n            {bronze_cols_str},\n            ingested_at TIMESTAMP,\n            source_file TEXT\n        )",
+                "DROP TABLE IF EXISTS silver_clean_sales",
+                f"CREATE TABLE silver_clean_sales (\n            id INTEGER PRIMARY KEY AUTOINCREMENT,\n            {silver_cols_str}\n        )",
+                "DROP TABLE IF EXISTS quarantine_rejected_sales",
+                f"CREATE TABLE quarantine_rejected_sales (\n            id INTEGER PRIMARY KEY AUTOINCREMENT,\n            {quarantine_cols_str}\n        )"
+            ])
+            
         return queries
 
     def get_quarantine_transform_query(self) -> str:
@@ -130,7 +203,7 @@ class DatabaseAdapter:
         if not self.profile:
             return self._get_static_quarantine_query()
             
-        timestamp_func = "CURRENT_TIMESTAMP" if self.dialect == "postgres" else "datetime('now')"
+        timestamp_func = "CURRENT_TIMESTAMP" if self.dialect in ("postgres", "duckdb") else "datetime('now')"
         
         csv_cols = list(self.profile.keys())
         raw_cols_str = ", ".join([f'"raw_{col}"' for col in csv_cols])
@@ -213,7 +286,7 @@ class DatabaseAdapter:
         if not self.profile:
             return self._get_static_silver_query()
             
-        timestamp_func = "CURRENT_TIMESTAMP" if self.dialect == "postgres" else "datetime('now')"
+        timestamp_func = "CURRENT_TIMESTAMP" if self.dialect in ("postgres", "duckdb") else "datetime('now')"
         
         csv_cols = list(self.profile.keys())
         id_cols = [col for col, details in self.profile.items() if details["role"] == "id"]
@@ -246,7 +319,7 @@ class DatabaseAdapter:
         for col_name, details in self.profile.items():
             role = details["role"]
             if role == "date":
-                date_cast = f'CAST("{col_name}" AS DATE)' if self.dialect == "postgres" else f'date("{col_name}")'
+                date_cast = f'CAST("{col_name}" AS DATE)' if self.dialect in ("postgres", "duckdb") else f'date("{col_name}")'
                 silver_selects.append(date_cast)
             elif role in ("measure", "currency"):
                 silver_selects.append(f'CAST("{col_name}" AS REAL)')
@@ -282,53 +355,98 @@ class DatabaseAdapter:
 
     def _get_static_schema_queries(self) -> list[str]:
         """Static query mappings for original e-commerce baseline schema."""
-        id_type = "SERIAL PRIMARY KEY" if self.dialect == "postgres" else "INTEGER PRIMARY KEY AUTOINCREMENT"
-        return [
-            # Bronze Raw Layer
-            f"""
-            CREATE TABLE IF NOT EXISTS bronze_raw_sales (
-                date TEXT,
-                category TEXT,
-                revenue TEXT,
-                cost TEXT,
-                units_sold TEXT,
-                ingested_at TIMESTAMP,
-                source_file TEXT
-            );
-            """,
-            # Silver Cleaned Layer
-            f"""
-            CREATE TABLE IF NOT EXISTS silver_clean_sales (
-                id {id_type},
-                date DATE,
-                category TEXT,
-                revenue REAL,
-                cost REAL,
-                units_sold INTEGER,
-                profit REAL,
-                cleaned_at TIMESTAMP
-            );
-            """,
-            # Quarantine Rejected Layer
-            f"""
-            CREATE TABLE IF NOT EXISTS quarantine_rejected_sales (
-                id {id_type},
-                raw_date TEXT,
-                raw_category TEXT,
-                raw_revenue TEXT,
-                raw_cost TEXT,
-                raw_units_sold TEXT,
-                source_file TEXT,
-                ingested_at TEXT,
-                rejection_reason TEXT,
-                quarantined_at TIMESTAMP
-            );
-            """
-        ]
+        if self.dialect in ("postgres", "duckdb"):
+            return [
+                "CREATE SEQUENCE IF NOT EXISTS silver_seq",
+                "CREATE SEQUENCE IF NOT EXISTS quarantine_seq",
+                "DROP TABLE IF EXISTS bronze_raw_sales CASCADE",
+                """
+                CREATE TABLE bronze_raw_sales (
+                    date TEXT,
+                    category TEXT,
+                    revenue TEXT,
+                    cost TEXT,
+                    units_sold TEXT,
+                    ingested_at TIMESTAMP,
+                    source_file TEXT
+                );
+                """,
+                "DROP TABLE IF EXISTS silver_clean_sales CASCADE",
+                """
+                CREATE TABLE silver_clean_sales (
+                    id INTEGER DEFAULT nextval('silver_seq') PRIMARY KEY,
+                    date DATE,
+                    category TEXT,
+                    revenue REAL,
+                    cost REAL,
+                    units_sold INTEGER,
+                    profit REAL,
+                    cleaned_at TIMESTAMP
+                );
+                """,
+                "DROP TABLE IF EXISTS quarantine_rejected_sales CASCADE",
+                """
+                CREATE TABLE quarantine_rejected_sales (
+                    id INTEGER DEFAULT nextval('quarantine_seq') PRIMARY KEY,
+                    raw_date TEXT,
+                    raw_category TEXT,
+                    raw_revenue TEXT,
+                    raw_cost TEXT,
+                    raw_units_sold TEXT,
+                    source_file TEXT,
+                    ingested_at TEXT,
+                    rejection_reason TEXT,
+                    quarantined_at TIMESTAMP
+                );
+                """
+            ]
+        else:
+            return [
+                "DROP TABLE IF EXISTS bronze_raw_sales",
+                """
+                CREATE TABLE bronze_raw_sales (
+                    date TEXT,
+                    category TEXT,
+                    revenue TEXT,
+                    cost TEXT,
+                    units_sold TEXT,
+                    ingested_at TIMESTAMP,
+                    source_file TEXT
+                );
+                """,
+                "DROP TABLE IF EXISTS silver_clean_sales",
+                """
+                CREATE TABLE silver_clean_sales (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date DATE,
+                    category TEXT,
+                    revenue REAL,
+                    cost REAL,
+                    units_sold INTEGER,
+                    profit REAL,
+                    cleaned_at TIMESTAMP
+                );
+                """,
+                "DROP TABLE IF EXISTS quarantine_rejected_sales",
+                """
+                CREATE TABLE quarantine_rejected_sales (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    raw_date TEXT,
+                    raw_category TEXT,
+                    raw_revenue TEXT,
+                    raw_cost TEXT,
+                    raw_units_sold TEXT,
+                    source_file TEXT,
+                    ingested_at TEXT,
+                    rejection_reason TEXT,
+                    quarantined_at TIMESTAMP
+                );
+                """
+            ]
 
     def _get_static_quarantine_query(self) -> str:
         """Static query to extract rejections into the quarantine table."""
-        timestamp_func = "CURRENT_TIMESTAMP" if self.dialect == "postgres" else "datetime('now')"
+        timestamp_func = "CURRENT_TIMESTAMP" if self.dialect in ("postgres", "duckdb") else "datetime('now')"
         return f"""
             INSERT INTO quarantine_rejected_sales (
                 raw_date, raw_category, raw_revenue, raw_cost, raw_units_sold, 
@@ -372,8 +490,8 @@ class DatabaseAdapter:
 
     def _get_static_silver_query(self) -> str:
         """Static query to populate the silver_clean_sales layer."""
-        timestamp_func = "CURRENT_TIMESTAMP" if self.dialect == "postgres" else "datetime('now')"
-        date_cast = "CAST(date AS DATE)" if self.dialect == "postgres" else "date(date)"
+        timestamp_func = "CURRENT_TIMESTAMP" if self.dialect in ("postgres", "duckdb") else "datetime('now')"
+        date_cast = "CAST(date AS DATE)" if self.dialect in ("postgres", "duckdb") else "date(date)"
         return f"""
             WITH ranked_bronze AS (
                 SELECT 
@@ -414,7 +532,7 @@ class DatabaseAdapter:
 
     def _get_static_gold_query(self) -> str:
         """Static query to populate the gold_monthly_metrics aggregates."""
-        if self.dialect == "postgres":
+        if self.dialect in ("postgres", "duckdb"):
             return """
                 WITH monthly_sales AS (
                     SELECT 

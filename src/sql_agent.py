@@ -1,4 +1,4 @@
-import sqlite3
+import duckdb
 import os
 import re
 import logging
@@ -25,24 +25,24 @@ def get_database_schema() -> str:
     
     schema_details = []
     
-    if db.dialect == "postgres":
-        # Get list of public tables
+    if db.dialect in ("postgres", "duckdb"):
+        # Get list of public/main tables
         cursor.execute("""
             SELECT table_name 
             FROM information_schema.tables 
-            WHERE table_schema = 'public' 
+            WHERE table_schema IN ('public', 'main') 
               AND table_name NOT LIKE 'pg_%';
         """)
         tables = [row[0] for row in cursor.fetchall()]
         
         for table_name in tables:
             # Query column details for CREATE TABLE simulation
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT column_name, data_type 
                 FROM information_schema.columns 
-                WHERE table_name = %s
+                WHERE table_name = '{table_name}'
                 ORDER BY ordinal_position;
-            """, (table_name,))
+            """)
             cols = cursor.fetchall()
             create_sql = f"CREATE TABLE {table_name} (\n    " + ",\n    ".join([f"{col[0]} {col[1].upper()}" for col in cols]) + "\n);"
             
@@ -188,7 +188,7 @@ def execute_query(sql_query: str):
     # 2. LLM Output Validation Layer: Compile/Verify execution plan before running the query
     try:
         explain_cursor = conn.cursor()
-        explain_query = f"EXPLAIN {sql_query}" if db.dialect == "postgres" else f"EXPLAIN QUERY PLAN {sql_query}"
+        explain_query = f"EXPLAIN {sql_query}" if db.dialect in ("postgres", "duckdb") else f"EXPLAIN QUERY PLAN {sql_query}"
         explain_cursor.execute(explain_query)
         explain_cursor.close()
     except Exception as explain_err:

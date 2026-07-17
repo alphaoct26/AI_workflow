@@ -14,7 +14,7 @@ DATA_DIR = BASE_DIR / "data"
 POWERBI_DIR = BASE_DIR / "PowerBI_Report"
 
 # Database Path
-DB_PATH = DATA_DIR / "ecommerce.db"
+DB_PATH = DATA_DIR / "ecommerce.duckdb"
 
 # Data File Paths
 RAW_CSV_PATH = DATA_DIR / "raw_sales.csv"
