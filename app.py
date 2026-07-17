@@ -7,12 +7,35 @@ from flask import Flask, jsonify, request, send_from_directory, render_template
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("Web_Dashboard")
 
+IS_VERCEL = bool(os.environ.get("VERCEL") or os.environ.get("NOW_BUILDER"))
+
 app = Flask(__name__, template_folder="templates")
+
+# ── Auto-seed demo workspace on Vercel (runs once at cold-start) ──────────────
+if IS_VERCEL:
+    try:
+        from src.demo_seeder import seed as _seed_demo
+        _seed_demo("default")
+        logger.info("Vercel cold-start: demo workspace seeded successfully.")
+    except Exception as _e:
+        logger.warning(f"Vercel cold-start seeding failed (non-fatal): {_e}")
 
 @app.route('/')
 def index():
     """Serves the dashboard index page."""
     return render_template('index.html')
+
+@app.route('/api/seed', methods=['POST'])
+def trigger_seed():
+    """Manually triggers demo data seeding for a workspace (useful for first-load on Vercel)."""
+    workspace_id = request.get_json(silent=True, force=True) or {}
+    workspace_id = workspace_id.get("workspace_id", "default")
+    try:
+        from src.demo_seeder import seed
+        ok = seed(workspace_id)
+        return jsonify({"seeded": ok, "workspace_id": workspace_id})
+    except Exception as e:
+        return jsonify({"seeded": False, "error": str(e)}), 500
 
 @app.route('/api/workspaces')
 def list_workspaces():
@@ -136,6 +159,14 @@ def workspace_details(workspace_id):
                     }
                 except Exception:
                     pass
+        
+        # 5. Gold Monthly Metrics (for the breakdown table in the UI)
+        gold_metrics = []
+        try:
+            cursor.execute("SELECT month, total_revenue, total_cost, profit_margin, total_units_sold, top_category FROM gold_monthly_metrics ORDER BY month")
+            gold_metrics = [[str(cell) for cell in row] for row in cursor.fetchall()]
+        except Exception:
+            pass
                     
         conn.close()
     except Exception as e:
@@ -147,7 +178,8 @@ def workspace_details(workspace_id):
         "dialect": db.dialect,
         "kpis": kpis,
         "tables": tables_schema,
-        "previews": previews
+        "previews": previews,
+        "gold_metrics": gold_metrics
     })
 
 @app.route('/api/workspace/<workspace_id>/chart')
