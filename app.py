@@ -9,8 +9,6 @@ from flask import Flask, jsonify, request, send_from_directory, render_template,
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("Web_Dashboard")
 
-IS_VERCEL = bool(os.environ.get("VERCEL") or os.environ.get("NOW_BUILDER"))
-
 app = Flask(__name__, template_folder="templates")
 
 # ─── Rich hardcoded demo data (always shown on Vercel) ─────────────────────────
@@ -156,10 +154,10 @@ def trigger_seed():
 
 @app.route("/api/workspaces")
 def list_workspaces():
-    """Returns the list of registered workspace IDs."""
-    workspaces = []
+    """Returns the list of registered workspace IDs. Always succeeds."""
     try:
         from src.config import DATA_DIR, DB_PATH
+        workspaces = []
         if DB_PATH.exists():
             workspaces.append("default")
         workspaces_dir = DATA_DIR / "workspaces"
@@ -167,20 +165,20 @@ def list_workspaces():
             for path in workspaces_dir.iterdir():
                 if path.is_dir() and (path / "analytics.duckdb").exists():
                     workspaces.append(path.name)
+        if not workspaces:
+            workspaces.append("default")
+        return jsonify(workspaces)
     except Exception:
-        pass
-    if not workspaces:
-        workspaces.append("default")
-    return jsonify(workspaces)
+        return jsonify(["default"])
 
 
 @app.route("/api/workspace/<workspace_id>")
 def workspace_details(workspace_id):
-    """Returns KPIs, schema, table previews, and Gold metrics for a workspace.
-    Falls back to rich hardcoded demo data when the database is empty or unavailable.
+    """Returns KPIs, schema, previews and Gold metrics.
+    Always returns valid JSON — falls back to demo data on any failure.
     """
-    # ── Try real DB first ──
     try:
+        # Lazy imports so a missing package doesn't crash the whole app
         from src.db_adapter import DatabaseAdapter
         from src.config import get_workspace_file_paths
 
@@ -189,28 +187,27 @@ def workspace_details(workspace_id):
         conn  = db.get_connection()
         cur   = conn.cursor()
 
-        bronze_count = quarantine_count = silver_count = 0
-        total_rev    = 0.0
-        avg_mar      = 0.0
-        tables_schema, previews, gold_metrics = {}, {}, []
+        bronze_count = silver_count = quarantine_count = 0
+        total_rev = avg_mar = 0.0
+        tables_schema: dict = {}
+        previews:      dict = {}
+        gold_metrics:  list = []
 
-        try:
-            cur.execute("SELECT COUNT(*) FROM bronze_raw_sales")
-            bronze_count = cur.fetchone()[0]
-        except Exception:
-            pass
-        try:
-            cur.execute("SELECT COUNT(*) FROM silver_clean_sales")
-            silver_count = cur.fetchone()[0]
-        except Exception:
-            pass
-        try:
-            cur.execute("SELECT COUNT(*) FROM quarantine_rejected_sales")
-            quarantine_count = cur.fetchone()[0]
-        except Exception:
-            pass
+        for stmt, key in [
+            ("SELECT COUNT(*) FROM bronze_raw_sales",      "b"),
+            ("SELECT COUNT(*) FROM silver_clean_sales",    "s"),
+            ("SELECT COUNT(*) FROM quarantine_rejected_sales", "q"),
+        ]:
+            try:
+                cur.execute(stmt)
+                val = cur.fetchone()[0]
+                if key == "b": bronze_count    = val
+                if key == "s": silver_count    = val
+                if key == "q": quarantine_count = val
+            except Exception:
+                pass
 
-        # If no real data → fall through to demo fallback
+        # No real data → use demo fallback
         if silver_count == 0:
             conn.close()
             raise ValueError("empty_db")
@@ -240,12 +237,11 @@ def workspace_details(workspace_id):
             if table in tables_schema:
                 try:
                     cols     = tables_schema[table]
-                    cols_str = ", ".join([f'"{c}"' for c in cols])
+                    cols_str = ", ".join(f'"{c}"' for c in cols)
                     cur.execute(f"SELECT {cols_str} FROM {table} LIMIT 10")
-                    rows = cur.fetchall()
                     previews[table] = {
                         "columns": cols,
-                        "rows": [[str(c) for c in row] for row in rows],
+                        "rows":    [[str(c) for c in row] for row in cur.fetchall()],
                     }
                 except Exception:
                     pass
@@ -260,7 +256,6 @@ def workspace_details(workspace_id):
             pass
 
         conn.close()
-
         return jsonify({
             "workspace_id": workspace_id,
             "dialect":      db.dialect,
@@ -279,11 +274,10 @@ def workspace_details(workspace_id):
             "gold_metrics": gold_metrics,
         })
 
-    except Exception as e:
-        if "empty_db" not in str(e):
-            logger.warning(f"DB unavailable for '{workspace_id}', serving demo data: {e}")
-        # ── Demo fallback ──
-        resp            = dict(_DEMO_RESPONSE)
+    except Exception as exc:
+        if "empty_db" not in str(exc):
+            logger.warning(f"Serving demo data for '{workspace_id}' — reason: {exc}")
+        resp = dict(_DEMO_RESPONSE)
         resp["workspace_id"] = workspace_id
         return jsonify(resp)
 
