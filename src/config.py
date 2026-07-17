@@ -2,10 +2,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Base Workspace Directory
-BASE_DIR = Path("d:/AI_workflow_project")
+# Base Workspace Directory — resolved dynamically so it works on any OS / Vercel
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment variables
+# Load environment variables (silently skipped if .env not found)
 load_dotenv(BASE_DIR / ".env")
 
 # Folders
