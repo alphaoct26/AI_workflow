@@ -1,8 +1,5 @@
-# Vercel deployment — minimal dependencies only.
-# Heavy packages (duckdb, psycopg2, pandas, google-genai, python-pptx)
-# are excluded because they have C extensions that fail on Vercel's build.
-# The app serves hardcoded demo data when those packages are unavailable.
+# Vercel deployment — Flask only.
+# Chart is served as embedded SVG (no matplotlib needed).
+# All heavy pipeline packages (duckdb, pandas, etc.) are optional.
 Flask>=3.0.0
 python-dotenv>=1.0.0
-matplotlib>=3.7.0
-numpy>=1.24.0

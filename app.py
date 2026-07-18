@@ -5,7 +5,6 @@ All src.* imports are deferred and wrapped so any import failure
 gracefully falls back to demo data without crashing the server.
 """
 import os
-import io
 import logging
 from flask import Flask, jsonify, request, send_from_directory, render_template, Response
 
@@ -74,62 +73,74 @@ DEMO_PAYLOAD = {
     "gold_metrics": DEMO_GOLD,
 }
 
+
 _chart_cache: bytes = b""
 
 
 def _make_demo_chart() -> bytes:
-    """Render a revenue+margin chart in memory. Returns empty bytes on failure."""
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import matplotlib.ticker as mticker
-        from datetime import datetime
+    """Generate a bar+line chart as an SVG — zero dependencies."""
+    months  = ["Jan '26", "Feb '26", "Mar '26", "Apr '26", "May '26", "Jun '26"]
+    revenue = [189242, 148119, 172384, 165903, 181247, 276485]
+    margins = [40.27, 32.00, 41.33, 40.99, 40.64, 40.02]
 
-        labels  = [datetime.strptime(r[0], "%Y-%m").strftime("%b '%y") for r in DEMO_GOLD]
-        revenue = [float(r[1]) for r in DEMO_GOLD]
-        margins = [float(r[3]) for r in DEMO_GOLD]
+    W, H = 900, 400
+    pad_l, pad_r, pad_t, pad_b = 80, 40, 40, 60
+    chart_w = W - pad_l - pad_r
+    chart_h = H - pad_t - pad_b
 
-        fig, ax1 = plt.subplots(figsize=(11, 5))
-        fig.patch.set_facecolor("#0f111a")
-        ax1.set_facecolor("#0f111a")
+    max_rev = max(revenue)
+    min_mar, max_mar = min(margins) - 2, max(margins) + 2
 
-        colors = ["#6366f1"] * (len(revenue) - 1) + ["#0d9488"]
-        bars   = ax1.bar(labels, revenue, color=colors, width=0.6, zorder=3)
-        for bar, val in zip(bars, revenue):
-            ax1.text(bar.get_x() + bar.get_width() / 2,
-                     bar.get_height() + max(revenue) * 0.01,
-                     f"${val:,.0f}", ha="center", va="bottom",
-                     fontsize=9, color="#f3f4f6", fontweight="bold")
+    bar_w = chart_w / len(revenue) * 0.55
+    bar_gap = chart_w / len(revenue)
 
-        ax2 = ax1.twinx()
-        ax2.plot(labels, margins, color="#f59e0b", marker="o",
-                 linewidth=2, markersize=6, zorder=4)
-        ax2.set_ylabel("Profit Margin %", color="#f59e0b", fontsize=10)
-        ax2.tick_params(axis="y", colors="#f59e0b")
-        ax2.spines[:].set_color("none")
-        ax2.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f%%"))
-        ax2.set_facecolor("#0f111a")
+    def rx(i):  # bar center x
+        return pad_l + i * bar_gap + bar_gap / 2
 
-        ax1.set_title("Monthly Revenue & Profit Margin — Auto-Analyst Demo",
-                      color="#f3f4f6", fontsize=13, fontweight="bold", pad=16)
-        ax1.set_ylabel("Total Revenue (USD)", color="#9ca3af", fontsize=10)
-        ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
-        ax1.tick_params(axis="x", colors="#9ca3af")
-        ax1.tick_params(axis="y", colors="#9ca3af")
-        ax1.spines[:].set_color("none")
-        ax1.grid(axis="y", color="#ffffff0d", linestyle="--", zorder=0)
+    def ry(v):  # revenue → y
+        return pad_t + chart_h - (v / max_rev) * chart_h
 
-        fig.tight_layout(pad=2)
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=140, bbox_inches="tight",
-                    facecolor=fig.get_facecolor())
-        plt.close(fig)
-        buf.seek(0)
-        return buf.read()
-    except Exception as e:
-        logger.warning(f"Demo chart skipped: {e}")
-        return b""
+    def my(v):  # margin → y
+        return pad_t + chart_h - ((v - min_mar) / (max_mar - min_mar)) * chart_h
+
+    bars = ""
+    for i, (rev, label) in enumerate(zip(revenue, months)):
+        x = rx(i) - bar_w / 2
+        y = ry(rev)
+        h = chart_h - (y - pad_t)
+        color = "#0d9488" if i == len(revenue) - 1 else "#6366f1"
+        bars += f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{h:.1f}" fill="{color}" rx="4"/>\n'
+        bars += f'<text x="{rx(i):.1f}" y="{y - 6:.1f}" fill="#f3f4f6" font-size="11" text-anchor="middle" font-weight="bold">${rev//1000}K</text>\n'
+        bars += f'<text x="{rx(i):.1f}" y="{H - 18:.1f}" fill="#9ca3af" font-size="11" text-anchor="middle">{label}</text>\n'
+
+    points = " ".join(f"{rx(i):.1f},{my(m):.1f}" for i, m in enumerate(margins))
+    dots = "".join(f'<circle cx="{rx(i):.1f}" cy="{my(m):.1f}" r="5" fill="#f59e0b"/>' for i, m in enumerate(margins))
+    margin_labels = "".join(
+        f'<text x="{rx(i):.1f}" y="{my(m) - 9:.1f}" fill="#f59e0b" font-size="10" text-anchor="middle">{m:.1f}%</text>'
+        for i, m in enumerate(margins)
+    )
+
+    # Y-axis labels (revenue)
+    y_labels = ""
+    for tick in [0, 50000, 100000, 150000, 200000, 250000]:
+        y = ry(tick)
+        y_labels += f'<line x1="{pad_l}" y1="{y:.1f}" x2="{W - pad_r}" y2="{y:.1f}" stroke="#ffffff0d" stroke-width="1"/>\n'
+        y_labels += f'<text x="{pad_l - 6}" y="{y + 4:.1f}" fill="#9ca3af" font-size="10" text-anchor="end">${tick//1000}K</text>\n'
+
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
+  <rect width="{W}" height="{H}" fill="#0f111a" rx="12"/>
+  <text x="{W//2}" y="24" fill="#f3f4f6" font-size="14" font-weight="bold" text-anchor="middle" font-family="sans-serif">
+    Monthly Revenue &amp; Profit Margin — Auto-Analyst Demo
+  </text>
+  <g font-family="sans-serif">
+    {y_labels}
+    {bars}
+    <polyline points="{points}" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-linejoin="round"/>
+    {dots}
+    {margin_labels}
+  </g>
+</svg>"""
+    return svg.encode("utf-8")
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
@@ -278,11 +289,11 @@ def workspace_chart(workspace_id):
             return send_from_directory(p.parent, p.name)
     except Exception:
         pass
-    # Fall back to in-memory demo chart
+    # Fall back to in-memory SVG demo chart
     if not _chart_cache:
         _chart_cache = _make_demo_chart()
     if _chart_cache:
-        return Response(_chart_cache, mimetype="image/png",
+        return Response(_chart_cache, mimetype="image/svg+xml",
                         headers={"Cache-Control": "public, max-age=3600"})
     return "", 404
 
