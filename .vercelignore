@@ -1,0 +1,15 @@
+# Exclude from Vercel deployment bundle
+data/
+landing_zone/
+PowerBI_Report/
+tests/
+*.duckdb
+*.db
+*.pptx
+*.pbip
+*.pbir
+__pycache__/
+*.pyc
+.env
+requirements-full.txt
+requirements-vercel.txt
