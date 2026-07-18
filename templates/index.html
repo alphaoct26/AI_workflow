@@ -256,12 +256,18 @@
             font-weight: 700;
         }
 
-        /* Middle Grid Layout */
+        /* Middle Grid Layout — Chart top, Chat bottom full-width */
         .middle-grid {
-            display: grid;
-            grid-template-columns: 1.2fr 1fr;
+            display: flex;
+            flex-direction: column;
             gap: 24px;
-            min-height: 400px;
+        }
+
+        .chart-chat-row {
+            display: grid;
+            grid-template-columns: 1.4fr 1fr;
+            gap: 24px;
+            align-items: start;
         }
 
         .card {
@@ -314,20 +320,18 @@
         .chat-container {
             display: flex;
             flex-direction: column;
-            flex-grow: 1;
-            height: 100%;
-            max-height: 420px;
+            height: 460px;
         }
 
         .chat-messages {
-            flex-grow: 1;
+            flex: 1;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
             gap: 12px;
-            padding-right: 8px;
-            margin-bottom: 12px;
-            max-height: 300px;
+            padding-right: 4px;
+            padding-bottom: 8px;
+            min-height: 0;
         }
 
         .message {
@@ -370,6 +374,7 @@
             gap: 8px;
             border-top: 1px solid var(--border-color);
             padding-top: 12px;
+            flex-shrink: 0;
         }
 
         .chat-input {
@@ -500,7 +505,9 @@
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
-            margin-bottom: 8px;
+            padding: 8px 0;
+            flex-shrink: 0;
+            border-top: 1px solid var(--border-color);
         }
 
         .suggestion-chip {
@@ -586,72 +593,73 @@
 
         <!-- Charts and SQL Chat Grid -->
         <div class="middle-grid">
-            <!-- Monthly Aggregations Chart Card -->
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">Dynamic Gold Visualizations</h2>
-                </div>
-                <div class="chart-container" id="chart-wrapper">
-                    <p style="color: var(--text-muted); font-size: 0.9rem;">No visualizations generated.</p>
-                </div>
-                <!-- Gold Monthly Breakdown Table -->
-                <div id="gold-breakdown" style="display:none;">
-                    <div style="font-size:0.78rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px;">Monthly Gold Metrics</div>
-                    <div class="table-responsive" style="max-height:180px;">
-                        <table id="gold-table">
-                            <thead><tr><th>Month</th><th>Revenue</th><th>Cost</th><th>Margin %</th><th>Units</th><th>Top Category</th></tr></thead>
-                            <tbody></tbody>
-                        </table>
+            <div class="chart-chat-row">
+                <!-- Monthly Aggregations Chart Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Dynamic Gold Visualizations</h2>
                     </div>
-                </div>
-            </div>
-
-            <!-- SQL Agent Chat Card -->
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">Conversational SQL Agent Shell</h2>
-                </div>
-                <div class="chat-container">
-                    <div class="chat-messages" id="chat-box">
-                        <div class="message agent">
-                            Hello! I am your AI Data Agent. Ask me questions about the Bronze raw data, Silver cleaned sales, or Gold aggregation metrics. I will translate your questions into SQL, run them, and compile the insights!
+                    <div class="chart-container" id="chart-wrapper">
+                        <p style="color: var(--text-muted); font-size: 0.9rem;">No visualizations generated.</p>
+                    </div>
+                    <!-- Gold Monthly Breakdown Table -->
+                    <div id="gold-breakdown" style="display:none;">
+                        <div style="font-size:0.78rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px;">Monthly Gold Metrics</div>
+                        <div class="table-responsive" style="max-height:180px;">
+                            <table id="gold-table">
+                                <thead><tr><th>Month</th><th>Revenue</th><th>Cost</th><th>Margin %</th><th>Units</th><th>Top Category</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
                         </div>
                     </div>
-                    <!-- Suggested questions -->
-                    <div class="suggestions" id="suggestion-chips">
-                        <span class="suggestion-chip" onclick="fillQuestion(this)">Total revenue by category</span>
-                        <span class="suggestion-chip" onclick="fillQuestion(this)">Which month had highest profit margin?</span>
-                        <span class="suggestion-chip" onclick="fillQuestion(this)">Show 5 quarantined records</span>
-                        <span class="suggestion-chip" onclick="fillQuestion(this)">Electronics revenue in June</span>
-                    </div>
-                    <div class="chat-input-container">
-                        <input type="text" class="chat-input" id="chat-input" placeholder="e.g. What was the total units sold for Electronics in March?">
-                        <button class="btn btn-primary" id="chat-send-btn" style="padding: 10px 24px;">Ask</button>
-                    </div>
                 </div>
-            </div>
-        </div>
 
-        <!-- Data Explorer Preview Tables -->
-        <div class="card">
-            <div class="card-header" style="border-bottom: none; padding-bottom: 0;">
-                <div class="tabs-header">
-                    <button class="tab-btn active" id="tab-silver" onclick="switchTable('silver')">Silver Cleaned Sales (Preview)</button>
-                    <button class="tab-btn" id="tab-quarantine" onclick="switchTable('quarantine')">Quarantined Rejected Sales (Preview)</button>
+                <!-- SQL Agent Chat Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Conversational SQL Agent Shell</h2>
+                    </div>
+                    <div class="chat-container">
+                        <div class="chat-messages" id="chat-box">
+                            <div class="message agent">
+                                Hello! I am your AI Data Agent. Ask me questions about the Bronze raw data, Silver cleaned sales, or Gold aggregation metrics. I will translate your questions into SQL, run them, and compile the insights!
+                            </div>
+                        </div>
+                        <!-- Suggested questions -->
+                        <div class="suggestions" id="suggestion-chips">
+                            <span class="suggestion-chip" onclick="fillQuestion(this)">Total revenue by category</span>
+                            <span class="suggestion-chip" onclick="fillQuestion(this)">Which month had highest profit margin?</span>
+                            <span class="suggestion-chip" onclick="fillQuestion(this)">Show 5 quarantined records</span>
+                            <span class="suggestion-chip" onclick="fillQuestion(this)">Electronics revenue in June</span>
+                        </div>
+                        <div class="chat-input-container">
+                            <input type="text" class="chat-input" id="chat-input" placeholder="e.g. What was the total units sold for Electronics in March?">
+                            <button class="btn btn-primary" id="chat-send-btn" style="padding: 10px 24px;">Ask</button>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="table-responsive" id="table-wrapper">
-                <table id="preview-table">
-                    <thead>
-                        <tr><th>No Data Available</th></tr>
-                    </thead>
-                    <tbody>
-                        <!-- Dynamically filled -->
-                    </tbody>
-                </table>
+
+            <!-- Data Explorer Preview Tables — full width below -->
+            <div class="card">
+                <div class="card-header" style="border-bottom: none; padding-bottom: 0;">
+                    <div class="tabs-header">
+                        <button class="tab-btn active" id="tab-silver" onclick="switchTable('silver')">Silver Cleaned Sales (Preview)</button>
+                        <button class="tab-btn" id="tab-quarantine" onclick="switchTable('quarantine')">Quarantined Rejected Sales (Preview)</button>
+                    </div>
+                </div>
+                <div class="table-responsive" id="table-wrapper">
+                    <table id="preview-table">
+                        <thead>
+                            <tr><th>No Data Available</th></tr>
+                        </thead>
+                        <tbody>
+                            <!-- Dynamically filled -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
-    </div>
 
     <!-- Script Routing Logic -->
     <script>
